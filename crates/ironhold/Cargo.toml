@@ -1,0 +1,55 @@
+[package]
+name = "ironhold"
+description = "A full-stack Rust web framework: secure by default, productive, and fast"
+readme = "../../README.md"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[features]
+# Database backends. New apps use SQLite; enable `postgres` for Postgres.
+sqlite = ["dep:ironhold-db", "ironhold-db/sqlite"]
+postgres = ["dep:ironhold-db", "ironhold-db/postgres"]
+# `ironhold::testing::TestClient`, for your app's tests.
+testing = ["dep:http-body-util", "dep:serde_urlencoded", "dep:tower"]
+
+[dependencies]
+http-body-util = { workspace = true, optional = true }
+ironhold-auth.workspace = true
+ironhold-core.workspace = true
+ironhold-db = { workspace = true, optional = true }
+ironhold-forms.workspace = true
+ironhold-html.workspace = true
+ironhold-security.workspace = true
+ironhold-session.workspace = true
+serde_urlencoded = { workspace = true, optional = true }
+tower = { workspace = true, optional = true }
+
+[dev-dependencies]
+getrandom.workspace = true
+http-body-util.workspace = true
+maud.workspace = true
+serde.workspace = true
+sqlx.workspace = true
+tokio.workspace = true
+tower.workspace = true
+
+[[test]]
+name = "database"
+required-features = ["sqlite"]
+
+[[test]]
+name = "auth"
+required-features = ["testing"]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[lints]
+workspace = true

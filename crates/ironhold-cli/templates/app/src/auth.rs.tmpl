@@ -1,0 +1,134 @@
+//! Sign up, log in and log out.
+
+use ironhold::auth::{self, check_new_password, safe_redirect_path};
+use ironhold::http::StatusCode;
+use ironhold::prelude::*;
+use ironhold::response::Response;
+use serde::Deserialize;
+
+use crate::layout::page;
+use crate::user;
+
+#[derive(Deserialize)]
+pub struct Credentials {
+    email: String,
+    // `Secret` keeps the password out of logs and debug output.
+    password: Secret<String>,
+    #[serde(default)]
+    next: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct NextPage {
+    next: Option<String>,
+}
+
+pub async fn signup_page(nonce: CspNonce, csrf: CsrfToken) -> Markup {
+    page(&nonce, "Sign up", signup_form(&csrf, None, ""))
+}
+
+pub async fn signup(
+    nonce: CspNonce,
+    session: Session,
+    csrf: CsrfToken,
+    db: {{Db}},
+    Form(form): Form<Credentials>,
+) -> Result<Response> {
+    let email = user::normalize_email(&form.email);
+    let problem = if !user::looks_like_email(&email) {
+        Some("Enter a valid email address.".to_owned())
+    } else {
+        check_new_password(&form.password).err().map(|p| p.to_string())
+    };
+    if let Some(problem) = problem {
+        let form = signup_form(&csrf, Some(&problem), &email);
+        return Ok((StatusCode::UNPROCESSABLE_ENTITY, page(&nonce, "Sign up", form)).into_response());
+    }
+
+    let hash = auth::hash_password(&form.password).await?;
+    let Some(user) = user::create(&db, &email, &hash).await? else {
+        let problem = "An account with this email already exists. Try logging in.";
+        let form = signup_form(&csrf, Some(problem), &email);
+        return Ok((StatusCode::UNPROCESSABLE_ENTITY, page(&nonce, "Sign up", form)).into_response());
+    };
+
+    auth::login(&session, &user.id).await?;
+    Ok(Redirect::to("/dashboard").into_response())
+}
+
+pub async fn login_page(nonce: CspNonce, csrf: CsrfToken, Query(query): Query<NextPage>) -> Markup {
+    page(&nonce, "Log in", login_form(&csrf, None, "", query.next.as_deref()))
+}
+
+pub async fn login(
+    nonce: CspNonce,
+    session: Session,
+    csrf: CsrfToken,
+    throttle: LoginThrottle,
+    db: {{Db}},
+    Form(form): Form<Credentials>,
+) -> Result<Response> {
+    let email = user::normalize_email(&form.email);
+    // 429 after too many failures for this account.
+    throttle.check(&email)?;
+
+    let found = user::find_for_login(&db, &email).await?;
+    // With no matching user this still does the full check, so the response
+    // time doesn't reveal which emails have accounts.
+    let verified = auth::verify_password(found.as_ref().map(|(_, hash)| hash), &form.password).await?;
+
+    match found {
+        Some((user, _)) if verified => {
+            throttle.record_success(&email);
+            auth::login(&session, &user.id).await?;
+            let next = safe_redirect_path(form.next.as_deref(), "/dashboard");
+            Ok(Redirect::to(next).into_response())
+        }
+        _ => {
+            throttle.record_failure(&email);
+            let form = login_form(&csrf, Some("Invalid email or password."), &email, form.next.as_deref());
+            Ok((StatusCode::UNAUTHORIZED, page(&nonce, "Log in", form)).into_response())
+        }
+    }
+}
+
+#[derive(Deserialize)]
+pub struct LogoutForm {}
+
+pub async fn logout(session: Session, Form(_): Form<LogoutForm>) -> Result<Redirect> {
+    auth::logout(&session).await?;
+    Ok(Redirect::to("/"))
+}
+
+fn signup_form(csrf: &CsrfToken, problem: Option<&str>, email: &str) -> Markup {
+    html! {
+        h1 { "Create your account" }
+        @if let Some(problem) = problem { p.error role="alert" { (problem) } }
+        form method="post" action="/signup" {
+            (csrf)
+            label { "Email" input type="email" name="email" value=(email) autocomplete="email" required; }
+            label {
+                "Password"
+                input type="password" name="password" autocomplete="new-password"
+                    minlength=(auth::MIN_PASSWORD_CHARS) required;
+            }
+            button { "Sign up" }
+        }
+        p { "Already have an account? " a href="/login" { "Log in" } }
+    }
+}
+
+fn login_form(csrf: &CsrfToken, problem: Option<&str>, email: &str, next: Option<&str>) -> Markup {
+    html! {
+        h1 { "Log in" }
+        @if let Some(problem) = problem { p.error role="alert" { (problem) } }
+        form method="post" action="/login" {
+            (csrf)
+            @if let Some(next) = next { input type="hidden" name="next" value=(next); }
+            label { "Email" input type="email" name="email" value=(email) autocomplete="email" required; }
+            label { "Password" input type="password" name="password" autocomplete="current-password" required; }
+            button { "Log in" }
+        }
+        p { "New here? " a href="/signup" { "Create an account" } }
+    }
+}

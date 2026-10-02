@@ -1,0 +1,20 @@
+//! {{name}}, built with Ironhold.
+
+mod auth;
+mod layout;
+mod pages;
+pub mod user;
+
+use ironhold::prelude::*;
+
+/// Builds the app. `main.rs` serves it, and the tests drive it with
+/// `ironhold::testing::TestClient`.
+pub fn app(db: {{Db}}) -> App {
+    App::new()
+        .database(db)
+        .route("/", get(pages::home))
+        .route("/dashboard", get(pages::dashboard))
+        .route("/signup", get(auth::signup_page).post(auth::signup))
+        .route("/login", get(auth::login_page).post(auth::login))
+        .route("/logout", post(auth::logout))
+}

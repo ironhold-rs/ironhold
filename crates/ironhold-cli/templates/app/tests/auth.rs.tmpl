@@ -1,0 +1,91 @@
+//! Sign up, log in and log out, driven like a browser.
+
+mod common;
+
+use ironhold::http::StatusCode;
+use ironhold::testing::TestClient;
+
+const PASSWORD: &str = "correct horse battery";
+
+async fn client() -> Option<(TestClient, common::TestDb)> {
+    let test_db = common::test_db().await?;
+    let client = TestClient::new({{crate_ident}}::app(test_db.db.clone()));
+    Some((client, test_db))
+}
+
+#[tokio::test]
+async fn sign_up_log_out_and_log_in_again() {
+    let Some((mut client, _db)) = client().await else { return };
+    let email = common::unique_email("new");
+
+    client.get("/signup").await;
+    let response = client
+        .post_form("/signup", &[("email", email.as_str()), ("password", PASSWORD)])
+        .await;
+    assert_eq!(response.location(), Some("/dashboard"));
+    assert!(client.get("/dashboard").await.text().contains(&email));
+
+    let response = client.post_form("/logout", &[]).await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(client.get("/dashboard").await.status(), StatusCode::SEE_OTHER);
+
+    // Emails are case-insensitive.
+    client.get("/login").await;
+    let response = client
+        .post_form(
+            "/login",
+            &[("email", email.to_uppercase().as_str()), ("password", PASSWORD)],
+        )
+        .await;
+    assert_eq!(response.location(), Some("/dashboard"));
+}
+
+#[tokio::test]
+async fn weak_passwords_and_taken_emails_are_rejected() {
+    let Some((mut client, _db)) = client().await else { return };
+    let email = common::unique_email("taken");
+
+    client.get("/signup").await;
+    let response = client
+        .post_form("/signup", &[("email", email.as_str()), ("password", "short")])
+        .await;
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    client
+        .post_form("/signup", &[("email", email.as_str()), ("password", PASSWORD)])
+        .await;
+    client.clear_cookies();
+    client.get("/signup").await;
+    let response = client
+        .post_form("/signup", &[("email", email.as_str()), ("password", PASSWORD)])
+        .await;
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(response.text().contains("already exists"));
+}
+
+#[tokio::test]
+async fn wrong_password_is_rejected() {
+    let Some((mut client, _db)) = client().await else { return };
+    let email = common::unique_email("user");
+
+    client.get("/signup").await;
+    client
+        .post_form("/signup", &[("email", email.as_str()), ("password", PASSWORD)])
+        .await;
+    client.clear_cookies();
+
+    client.get("/login").await;
+    let response = client
+        .post_form("/login", &[("email", email.as_str()), ("password", "not my password")])
+        .await;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert!(response.text().contains("Invalid email or password"));
+}
+
+#[tokio::test]
+async fn the_dashboard_requires_login() {
+    let Some((mut client, _db)) = client().await else { return };
+    let response = client.get("/dashboard").await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(response.location(), Some("/login?next=%2Fdashboard"));
+}

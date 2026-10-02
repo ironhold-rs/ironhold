@@ -1,0 +1,38 @@
+//! Pages.
+
+use ironhold::prelude::*;
+
+use crate::layout::page;
+use crate::user::User;
+
+/// Works for everyone; shows different links when logged in.
+pub async fn home(nonce: CspNonce, user: Option<AuthUser<User>>) -> Markup {
+    page(
+        &nonce,
+        "Home",
+        html! {
+            h1 { "Welcome to {{name}}" }
+            @match user {
+                Some(user) => p { "You're logged in as " (user.email) ". " a href="/dashboard" { "Go to your dashboard" } },
+                None => p { a href="/signup" { "Create an account" } " or " a href="/login" { "log in" } "." },
+            }
+        },
+    )
+}
+
+/// Only logged-in users get here: `AuthUser` sends everyone else to the
+/// login page and brings them back afterwards.
+pub async fn dashboard(nonce: CspNonce, csrf: CsrfToken, user: AuthUser<User>) -> Markup {
+    page(
+        &nonce,
+        "Dashboard",
+        html! {
+            h1 { "Dashboard" }
+            p { "Hello, " (user.email) "!" }
+            form method="post" action="/logout" {
+                (csrf)
+                button { "Log out" }
+            }
+        },
+    )
+}

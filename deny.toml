@@ -1,0 +1,35 @@
+# cargo-deny configuration: https://embarkstudios.github.io/cargo-deny/
+
+[graph]
+# Check every optional backend, not just the default build.
+all-features = true
+
+[advisories]
+# Fail on any known vulnerability or unmaintained crate in the dependency tree.
+ignore = []
+
+[licenses]
+# Only permissive licenses compatible with MIT OR Apache-2.0.
+allow = [
+    "Apache-2.0",
+    "BSD-3-Clause",
+    # Mozilla's CA certificate list, bundled by webpki-roots for Postgres TLS.
+    "CDLA-Permissive-2.0",
+    # Public domain dedication, used by `notify` (the CLI's file watcher only;
+    # never compiled into apps).
+    "CC0-1.0",
+    "ISC",
+    "MIT",
+    "Unicode-3.0",
+    "Zlib",
+]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

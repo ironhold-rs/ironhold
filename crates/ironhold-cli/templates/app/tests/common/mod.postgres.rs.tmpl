@@ -1,0 +1,29 @@
+//! Helpers shared by the tests.
+
+#![allow(dead_code)]
+
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use ironhold::prelude::PgDb;
+
+pub struct TestDb {
+    pub db: PgDb,
+}
+
+/// The test database from `TEST_DATABASE_URL`. Tests are skipped when it
+/// isn't set.
+pub async fn test_db() -> Option<TestDb> {
+    let Ok(url) = std::env::var("TEST_DATABASE_URL") else {
+        eprintln!("skipping: set TEST_DATABASE_URL to run database tests");
+        return None;
+    };
+    let db = PgDb::connect(&url).await.expect("connect to the test database");
+    sqlx::migrate!().run(db.pool()).await.expect("run migrations");
+    Some(TestDb { db })
+}
+
+/// An email address no other test uses, since tests share one database.
+pub fn unique_email(name: &str) -> String {
+    let nanos = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+    format!("{name}-{nanos}@example.com")
+}

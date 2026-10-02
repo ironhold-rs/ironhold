@@ -1,0 +1,9 @@
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    {{database_url_line}}
+    let db = ironhold::prelude::{{Db}}::connect(&database_url).await?;
+    sqlx::migrate!().run(db.pool()).await?;
+
+    {{crate_ident}}::app(db).serve().await?;
+    Ok(())
+}

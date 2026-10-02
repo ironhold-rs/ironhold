@@ -1,0 +1,28 @@
+[package]
+name = "{{name}}"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.94"
+publish = false
+
+[dependencies]
+ironhold = {{ironhold_dep}}
+maud = "0.27"
+serde = { version = "1", features = ["derive"] }
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "macros", "migrate", "{{sqlx_backend}}"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+[dev-dependencies]
+ironhold = {{ironhold_test_dep}}
+
+# Fast, small release builds. Panics still unwind, so a bug in one request
+# becomes a 500 response instead of taking the server down.
+[profile.release]
+lto = "thin"
+codegen-units = 1
+
+# Password hashing is deliberately slow; unoptimised it takes seconds.
+[profile.dev.package.argon2]
+opt-level = 3
+[profile.dev.package.blake2]
+opt-level = 3

@@ -1,0 +1,106 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: fmt, clippy, test (SQLite + Postgres)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      IRONHOLD_TEST_POSTGRES_URL: postgres://postgres:postgres@localhost:5432/postgres
+      # Fail instead of silently skipping if the Postgres URL goes missing.
+      IRONHOLD_REQUIRE_POSTGRES: "1"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      # Both with and without the optional database backends.
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+      - run: cargo test --workspace --all-features --locked
+      - run: cargo doc --workspace --all-features --no-deps --locked
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+  new-app:
+    name: apps from `ironhold new` build and pass their tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target/generated-apps
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build -p ironhold-cli --locked
+      # Generated outside the workspace, the way users create apps.
+      - name: Generate a SQLite app and a Postgres app
+        run: |
+          cd "$RUNNER_TEMP"
+          "$CARGO_TARGET_DIR/debug/ironhold" new sqlite-app --ironhold-path "$GITHUB_WORKSPACE"
+          "$CARGO_TARGET_DIR/debug/ironhold" new pg-app --db postgres --ironhold-path "$GITHUB_WORKSPACE"
+      - name: SQLite app
+        working-directory: ${{ runner.temp }}/sqlite-app
+        run: |
+          cargo clippy --all-targets -- -D warnings
+          cargo test
+      - name: Postgres app (tests must run, not skip)
+        working-directory: ${{ runner.temp }}/pg-app
+        run: |
+          cargo clippy --all-targets -- -D warnings
+          cargo test -- --nocapture 2>&1 | tee test-output.txt
+          ! grep -q "skipping" test-output.txt
+
+  msrv:
+    name: minimum Rust version (1.94)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@1.94
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace --all-features --locked
+
+  deny:
+    name: licenses and advisories
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: EmbarkStudios/cargo-deny-action@v2

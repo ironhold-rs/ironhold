@@ -1,0 +1,52 @@
+# {{name}}
+
+A web app built with [Ironhold](https://github.com/ironhold-rs/ironhold): secure by default, with sign up, log in and log out ready to go.
+
+## Run it
+
+```bash
+ironhold dev
+```
+
+This builds the app, starts it at <http://127.0.0.1:3000>, and rebuilds and restarts it whenever you save a file. If a change doesn't compile, the last working version keeps running. You can also use `cargo run`.
+
+{{database_notes}}
+
+## Test
+
+```bash
+cargo test
+```
+
+Tests drive the app like a browser with `ironhold::testing::TestClient`.
+
+## Project layout
+
+| Path | What's in it |
+|---|---|
+| `src/lib.rs` | Routes |
+| `src/auth.rs` | Sign up, log in, log out |
+| `src/pages.rs` | Pages |
+| `src/user.rs` | Users and their queries |
+| `src/layout.rs` | The shared page layout |
+| `migrations/` | Database migrations, applied on startup |
+| `tests/` | Tests |
+
+## Configuration
+
+| Variable | Meaning |
+|---|---|
+| `DATABASE_URL` | Where the database is |
+| `IRONHOLD_ENV` | `development` or `production` |
+| `IRONHOLD_ADDR` | Listen address (default `127.0.0.1:3000`) |
+| `RUST_LOG` | Log level, e.g. `info` or `debug` |
+
+`ironhold dev` reads these from `.env` (see `.env.example`).
+
+## Deploy
+
+```bash
+cargo build --release
+```
+
+That produces one binary, `target/release/{{name}}`, with migrations built in. Run it with `IRONHOLD_ENV=production` and `IRONHOLD_ADDR=0.0.0.0:8080` behind an HTTPS proxy such as Caddy or Nginx. HTTPS is required in production: session cookies are only sent over HTTPS.
