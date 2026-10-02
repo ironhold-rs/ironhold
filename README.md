@@ -1,6 +1,11 @@
-# Ironhold
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/ironhold-logo-on-dark.svg">
+    <img alt="Ironhold" src="assets/brand/ironhold-logo.svg" width="420">
+  </picture>
+</p>
 
-A full-stack Rust web framework that is secure by default, productive and fast.
+<p align="center">A full-stack Rust web framework that is secure by default, productive and fast.</p>
 
 > Ironhold is in early development. APIs will change, and it isn't ready for production yet.
 
