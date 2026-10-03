@@ -42,7 +42,7 @@ crates/
   ironhold-security   security headers, CSP nonces, cross-origin checks, limits, Secret<T>
   ironhold-session    server-side sessions (tower-sessions), CSRF tokens
   ironhold-html       auto-escaping templates (maud)
-  ironhold-forms      CSRF-checked Form<T>
+  ironhold-forms      CSRF-checked Form<T>, validation returning Valid<T>
   ironhold-db         SQLite and Postgres on sqlx 0.9, database-backed sessions, Db extractor
   ironhold-auth       Argon2id passwords, login and logout, AuthUser, Authorize, LoginThrottle
   ironhold-cli        the `ironhold` command: `new` and `dev`
@@ -92,7 +92,7 @@ Layers run in this order for every request:
 | Phase | Scope |
 |---|---|
 | 0: Foundation (done) | Workspace, App builder, security headers, config, CI |
-| 1: v0.1 | Done: sessions, cross-origin checks, CSRF-checked forms, overload protection, SQLite and Postgres support, database-backed sessions, auth, test client, `ironhold new`, `ironhold dev`. Remaining: form validation, a `blog` example, documentation |
+| 1: v0.1 | Done: sessions, cross-origin checks, CSRF-checked forms, overload protection, SQLite and Postgres support, database-backed sessions, auth, test client, `ironhold new`, `ironhold dev`, form validation. Remaining: a `blog` example, documentation |
 | 2: v0.2 | Model layer and generators, live components, template hot reload |
 | 3: v0.3 | Jobs, scheduler, mail, file storage, cache, real-time updates, admin panel, deployment command |
 | 4: v0.4 | WebAssembly islands, Inertia adapter, OpenAPI for JSON APIs, translations |
@@ -128,6 +128,7 @@ Published benchmarks will run on a small cloud server with the load generator on
 | `Error` converts from any error with `?` | Handlers stay short, and anything unexpected becomes a logged `500`. `Error` doesn't implement `std::error::Error`, the same approach as `anyhow` | No plans |
 | Live components before WebAssembly islands | Server-driven pages need no Rust in the browser and ship far less code. Phoenix, which works this way, has been the most admired web framework in the Stack Overflow survey since 2023 | No plans |
 | SQLite is the default for new apps; Postgres is fully supported | No database server to run, and queries skip a network round trip. Rails 8 and Laravel 11 made the same choice. Framework tables work on both, and CI tests both | No plans |
+| Validation rules written in plain Rust, no derive macro | Readable, checked by the compiler, and no procedural macros in phase 1. `Valid<T>` can only come from `validate()`, so functions can demand checked input. A derive may come with the model layer | Phase 2 |
 | Model layer chosen by prototype | Models shape day-to-day work. SeaORM 2.0 and our own derive on sqlx will be compared by lines of code, compile time and error messages | Start of phase 2 |
 
 ## Project policies

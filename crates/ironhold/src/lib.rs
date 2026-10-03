@@ -27,6 +27,8 @@
 //! - Cross-origin protection for POST, PUT, PATCH and DELETE requests
 //! - Server-side sessions with hardened cookies ([`Session`])
 //! - CSRF tokens checked by the [`Form`] extractor ([`CsrfToken`])
+//! - Validation that returns [`Valid<T>`], so unchecked input can't reach
+//!   code that requires checked input
 //! - Request body size limits and request timeouts
 //! - Auto-escaping HTML templates ([`html!`])
 //! - Error responses that never leak internal details ([`Error`])
@@ -41,7 +43,7 @@
 
 pub use ironhold_core::{App, Config, ConfigError, Environment, Error, Result};
 pub use ironhold_core::{Router, body, extract, http, response, routing};
-pub use ironhold_forms::Form;
+pub use ironhold_forms::{Form, Invalid, Valid, Validate, ValidationErrors, Validator};
 pub use ironhold_html::{DOCTYPE, Markup, Render, html, raw_unchecked};
 pub use ironhold_security::{CspNonce, Secret, SecurityConfig};
 pub use ironhold_session::{CsrfToken, MemoryStore, Session, SessionConfig, SessionStore};
@@ -76,7 +78,8 @@ pub mod prelude {
     pub use crate::response::{IntoResponse, Redirect};
     pub use crate::routing::{delete, get, patch, post, put};
     pub use crate::{
-        App, CspNonce, CsrfToken, DOCTYPE, Error, Form, Markup, Result, Secret, Session, html,
+        App, CspNonce, CsrfToken, DOCTYPE, Error, Form, Invalid, Markup, Result, Secret, Session,
+        Valid, Validate, ValidationErrors, Validator, html,
     };
 
     #[cfg(feature = "postgres")]

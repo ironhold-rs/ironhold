@@ -15,8 +15,12 @@ categories.workspace = true
 axum.workspace = true
 ironhold-core.workspace = true
 ironhold-session.workspace = true
+maud.workspace = true
 serde.workspace = true
 serde_urlencoded.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
 
 [lints]
 workspace = true
