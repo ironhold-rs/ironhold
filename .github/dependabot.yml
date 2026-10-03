@@ -1,0 +1,26 @@
+# Weekly dependency updates, grouped into one pull request per ecosystem.
+# Security fixes don't wait for the schedule or the cooldown; they come as
+# separate pull requests as soon as an advisory is published.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    # Wait a week before adopting a new release, so a compromised version is
+    # more likely to be caught and yanked before it reaches us.
+    cooldown:
+      default-days: 7
+    groups:
+      rust-dependencies:
+        patterns: ["*"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      ci-actions:
+        patterns: ["*"]

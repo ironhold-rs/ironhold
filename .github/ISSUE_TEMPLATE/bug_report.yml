@@ -1,0 +1,48 @@
+name: Bug report
+description: Something in Ironhold doesn't work as documented.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Found a security problem? Don't file it here. Use "Report a security vulnerability" on the previous page instead.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce it
+      description: The smallest code or steps that show the problem.
+      render: rust
+    validations:
+      required: true
+  - type: input
+    id: ironhold-version
+    attributes:
+      label: Ironhold version or commit
+      placeholder: 0.0.1, or a commit hash
+    validations:
+      required: true
+  - type: input
+    id: rust-version
+    attributes:
+      label: Output of `rustc --version`
+    validations:
+      required: true
+  - type: dropdown
+    id: database
+    attributes:
+      label: Database
+      options:
+        - None
+        - SQLite
+        - Postgres
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
