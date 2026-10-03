@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*", "examples/*"]
 
 [workspace.package]
-version = "0.0.1"
+version = "0.1.0"
 edition = "2024"
 rust-version = "1.94"
 license = "MIT OR Apache-2.0"
@@ -15,14 +15,14 @@ categories = ["web-programming::http-server"]
 
 [workspace.dependencies]
 # Internal crates
-ironhold = { path = "crates/ironhold", version = "0.0.1" }
-ironhold-db = { path = "crates/ironhold-db", version = "0.0.1" }
-ironhold-auth = { path = "crates/ironhold-auth", version = "0.0.1" }
-ironhold-core = { path = "crates/ironhold-core", version = "0.0.1" }
-ironhold-html = { path = "crates/ironhold-html", version = "0.0.1" }
-ironhold-forms = { path = "crates/ironhold-forms", version = "0.0.1" }
-ironhold-security = { path = "crates/ironhold-security", version = "0.0.1" }
-ironhold-session = { path = "crates/ironhold-session", version = "0.0.1" }
+ironhold = { path = "crates/ironhold", version = "0.1.0" }
+ironhold-db = { path = "crates/ironhold-db", version = "0.1.0" }
+ironhold-auth = { path = "crates/ironhold-auth", version = "0.1.0" }
+ironhold-core = { path = "crates/ironhold-core", version = "0.1.0" }
+ironhold-html = { path = "crates/ironhold-html", version = "0.1.0" }
+ironhold-forms = { path = "crates/ironhold-forms", version = "0.1.0" }
+ironhold-security = { path = "crates/ironhold-security", version = "0.1.0" }
+ironhold-session = { path = "crates/ironhold-session", version = "0.1.0" }
 
 # External crates
 argon2 = "0.6"
