@@ -46,12 +46,12 @@ async fn page(csrf: CsrfToken) -> Markup {
 }
 
 async fn submit(csrf: CsrfToken, Form(input): Form<Subscribe>) -> Response {
-    let email = input.email.clone();
     match input.validate() {
         Ok(valid) => subscribe(valid).into_response(),
-        Err(errors) => (
+        // The input comes back with the errors, so the form keeps what was typed.
+        Err(invalid) => (
             StatusCode::UNPROCESSABLE_ENTITY,
-            form(&csrf, &errors, &email),
+            form(&csrf, &invalid.errors, &invalid.input.email),
         )
             .into_response(),
     }
@@ -60,7 +60,7 @@ async fn submit(csrf: CsrfToken, Form(input): Form<Subscribe>) -> Response {
 async fn api(Json(input): Json<Subscribe>) -> Response {
     match input.validate() {
         Ok(valid) => subscribe(valid).into_response(),
-        Err(errors) => errors.into_response(),
+        Err(invalid) => invalid.into_response(),
     }
 }
 

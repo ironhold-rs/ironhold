@@ -55,10 +55,11 @@ pub async fn signup(
     Form(mut form): Form<SignUpForm>,
 ) -> Result<Response> {
     form.email = user::normalize_email(&form.email);
-    let email = form.email.clone();
     let form = match form.validate() {
         Ok(form) => form,
-        Err(errors) => return Ok(invalid_signup(&nonce, &csrf, &errors, &email)),
+        Err(invalid) => {
+            return Ok(invalid_signup(&nonce, &csrf, &invalid.errors, &invalid.input.email));
+        }
     };
 
     let hash = auth::hash_password(&form.password).await?;
@@ -67,7 +68,7 @@ pub async fn signup(
             "email",
             "An account with this email already exists. Try logging in.",
         );
-        return Ok(invalid_signup(&nonce, &csrf, &errors, &email));
+        return Ok(invalid_signup(&nonce, &csrf, &errors, &form.email));
     };
 
     auth::login(&session, &user.id).await?;

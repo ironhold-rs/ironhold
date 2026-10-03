@@ -134,7 +134,7 @@ Without a database, sessions are kept in memory and are lost on restart. Connect
 
 ## Validation
 
-Write rules in plain Rust. `validate()` returns `Valid<T>` or the problems to show next to each field, and code that takes `Valid<T>` can't be called with unchecked input.
+Write rules in plain Rust. `validate()` returns `Valid<T>`, or `Invalid<T>` with the input as typed and the problems to show next to each field. Code that takes `Valid<T>` can't be called with unchecked input.
 
 ```rust
 use ironhold::http::StatusCode;
@@ -158,14 +158,17 @@ impl Validate for NewPost {
 async fn create_post(csrf: CsrfToken, Form(input): Form<NewPost>) -> Response {
     match input.validate() {
         Ok(post) => save(post).await,
-        // Re-render the form; in the template, `(errors.field("title"))`
-        // shows the title's problem next to its input.
-        Err(errors) => (StatusCode::UNPROCESSABLE_ENTITY, post_form(&csrf, &errors)).into_response(),
+        // Show the form again with what was typed. In the template,
+        // `(errors.field("title"))` shows the title's problem next to its input.
+        Err(invalid) => {
+            let form = post_form(&csrf, &invalid.input, &invalid.errors);
+            (StatusCode::UNPROCESSABLE_ENTITY, form).into_response()
+        }
     }
 }
 ```
 
-Rules: `required`, `min_chars`, `max_chars`, `max_bytes`, `email`, `url`, `one_of`, `equals`, `custom`, and `min`/`max` for numbers. `.message(...)` replaces the message of the rule before it. For JSON APIs, return the errors as the response: a `422` with `{"errors": {"title": ["This field is required."]}}`.
+Rules: `required`, `min_chars`, `max_chars`, `max_bytes`, `email`, `url`, `one_of`, `equals`, `custom`, and `min`/`max` for numbers. `.message(...)` replaces the message of the rule before it. For JSON APIs, return the `Invalid` value as the response: a `422` with `{"errors": {"title": ["This field is required."]}}`.
 
 ## Login and access control
 

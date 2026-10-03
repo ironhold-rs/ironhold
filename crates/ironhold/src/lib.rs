@@ -43,7 +43,7 @@
 
 pub use ironhold_core::{App, Config, ConfigError, Environment, Error, Result};
 pub use ironhold_core::{Router, body, extract, http, response, routing};
-pub use ironhold_forms::{Form, Valid, Validate, ValidationErrors, Validator};
+pub use ironhold_forms::{Form, Invalid, Valid, Validate, ValidationErrors, Validator};
 pub use ironhold_html::{DOCTYPE, Markup, Render, html, raw_unchecked};
 pub use ironhold_security::{CspNonce, Secret, SecurityConfig};
 pub use ironhold_session::{CsrfToken, MemoryStore, Session, SessionConfig, SessionStore};
@@ -78,8 +78,8 @@ pub mod prelude {
     pub use crate::response::{IntoResponse, Redirect};
     pub use crate::routing::{delete, get, patch, post, put};
     pub use crate::{
-        App, CspNonce, CsrfToken, DOCTYPE, Error, Form, Markup, Result, Secret, Session, Valid,
-        Validate, ValidationErrors, Validator, html,
+        App, CspNonce, CsrfToken, DOCTYPE, Error, Form, Invalid, Markup, Result, Secret, Session,
+        Valid, Validate, ValidationErrors, Validator, html,
     };
 
     #[cfg(feature = "postgres")]

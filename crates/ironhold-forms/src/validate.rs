@@ -29,24 +29,49 @@ use serde::{Serialize, Serializer, ser::SerializeMap};
 /// }
 ///
 /// let input = SignUp { email: "not an email".into(), name: "Raj".into() };
-/// let errors = input.validate().unwrap_err();
-/// assert_eq!(errors.first("email"), Some("Enter a valid email address."));
-/// assert_eq!(errors.first("name"), None);
+/// let invalid = input.validate().unwrap_err();
+/// assert_eq!(invalid.errors.first("email"), Some("Enter a valid email address."));
+/// assert_eq!(invalid.errors.first("name"), None);
+/// // The input comes back too, to show the form again with what was typed.
+/// assert_eq!(invalid.input.email, "not an email");
 /// ```
 pub trait Validate: Sized {
     /// Declares the rules. Called by [`validate`](Validate::validate).
     fn rules(&self, v: &mut Validator);
 
     /// Checks every rule. Returns the input wrapped in [`Valid`] if all
-    /// pass, or every field's first problem if not.
-    fn validate(self) -> Result<Valid<Self>, ValidationErrors> {
+    /// pass. Otherwise returns [`Invalid`]: the input as submitted, to show
+    /// the form again, and each field's first problem.
+    fn validate(self) -> Result<Valid<Self>, Invalid<Self>> {
         let mut v = Validator::default();
         self.rules(&mut v);
         if v.errors.is_empty() {
             Ok(Valid(self))
         } else {
-            Err(v.errors)
+            Err(Invalid {
+                input: self,
+                errors: v.errors,
+            })
         }
+    }
+}
+
+/// Input that failed validation.
+///
+/// In an HTML handler, show the form again from `input` with `errors` next
+/// to each field. In a JSON API, return it as the response: a `422` with
+/// the errors.
+#[derive(Debug)]
+pub struct Invalid<T> {
+    /// The input as submitted.
+    pub input: T,
+    /// Each field's first problem.
+    pub errors: ValidationErrors,
+}
+
+impl<T> IntoResponse for Invalid<T> {
+    fn into_response(self) -> Response {
+        self.errors.into_response()
     }
 }
 
@@ -430,7 +455,8 @@ mod tests {
             plan: "gold".into(),
         }
         .validate()
-        .unwrap_err();
+        .unwrap_err()
+        .errors;
         assert_eq!(errors.first("email"), Some("Enter your email address."));
         assert_eq!(errors.first("name"), Some("Use at least 2 characters."));
         assert_eq!(
@@ -449,7 +475,8 @@ mod tests {
             ..profile()
         }
         .validate()
-        .unwrap_err();
+        .unwrap_err()
+        .errors;
         // `required` passed, so its custom message isn't used.
         assert_eq!(errors.first("email"), Some("Enter a valid email address."));
     }
