@@ -57,20 +57,16 @@ Coming next: a model layer with generated migrations, and live components (inter
 
 ## Getting started
 
-Requires Rust 1.94 or newer ([install Rust](https://rustup.rs)). Ironhold isn't on crates.io yet, so for now install the CLI from a clone of this repository:
+Requires Rust 1.94 or newer ([install Rust](https://rustup.rs)). Install the `ironhold` command:
 
 ```bash
-git clone https://github.com/ironhold-rs/ironhold
-```
-
-```bash
-cargo install --path ironhold/crates/ironhold-cli
+cargo install ironhold-cli
 ```
 
 Create an app with sign up, log in and log out ready to go, then run it:
 
 ```bash
-ironhold new my-app --ironhold-path ./ironhold
+ironhold new my-app
 ```
 
 ```bash
@@ -91,7 +87,7 @@ To add Ironhold to an existing project instead:
 
 ```toml
 [dependencies]
-ironhold = { version = "0.0.1", features = ["sqlite"] }
+ironhold = { version = "0.1.0", features = ["sqlite"] }
 maud = "0.27" # needed by the html! macro for now
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
@@ -217,7 +213,7 @@ Enable a backend with a Cargo feature: `sqlite` (recommended to start: no server
 
 ```toml
 [dependencies]
-ironhold = { version = "0.0.1", features = ["sqlite"] }
+ironhold = { version = "0.1.0", features = ["sqlite"] }
 sqlx = { version = "0.9", features = ["sqlite", "macros", "migrate"] } # for query!() and migrate!()
 ```
 

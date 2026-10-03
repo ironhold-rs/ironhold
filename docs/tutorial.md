@@ -6,20 +6,16 @@ You'll need Rust 1.94 or newer and some Rust experience. You don't need to know 
 
 ## 1. Install the CLI
 
-Ironhold isn't on crates.io yet, so install the `ironhold` command from a clone of the repository:
+Install the `ironhold` command:
 
 ```bash
-git clone https://github.com/ironhold-rs/ironhold
-```
-
-```bash
-cargo install --path ironhold/crates/ironhold-cli
+cargo install ironhold-cli
 ```
 
 ## 2. Create the app
 
 ```bash
-ironhold new blog --ironhold-path ./ironhold
+ironhold new blog
 ```
 
 ```bash

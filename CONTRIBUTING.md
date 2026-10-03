@@ -27,6 +27,20 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
 ```
 
+## Working on the app template
+
+`ironhold new` builds apps from `crates/ironhold-cli/templates/app`. To try a change, create an app outside this repository that uses your local copy of Ironhold instead of the published crates:
+
+```bash
+cargo build -p ironhold-cli
+```
+
+```bash
+cd /tmp && /path/to/ironhold/target/debug/ironhold new my-app --ironhold-path /path/to/ironhold
+```
+
+Then run `cargo test` in `my-app`. CI does the same for SQLite and Postgres apps on every pull request.
+
 ## Ground rules
 
 - A change must not make apps less secure unless the developer explicitly opts out, and opt-outs need names that stand out in review, like `raw_unchecked`.
