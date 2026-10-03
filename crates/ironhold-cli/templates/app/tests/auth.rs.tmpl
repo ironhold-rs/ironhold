@@ -50,6 +50,8 @@ async fn weak_passwords_and_taken_emails_are_rejected() {
         .post_form("/signup", &[("email", email.as_str()), ("password", "short")])
         .await;
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    // The problem is shown next to the password field.
+    assert!(response.text().contains(r#"id="password-error""#));
 
     client
         .post_form("/signup", &[("email", email.as_str()), ("password", PASSWORD)])

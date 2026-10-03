@@ -63,13 +63,3 @@ pub async fn create(db: &{{Db}}, email: &str, password_hash: &PasswordHash) -> R
 pub fn normalize_email(email: &str) -> String {
     email.trim().to_lowercase()
 }
-
-/// A light check that catches typos. Only a confirmation email proves an
-/// address is real.
-pub fn looks_like_email(email: &str) -> bool {
-    email.len() <= 254
-        && !email.chars().any(char::is_whitespace)
-        && email
-            .split_once('@')
-            .is_some_and(|(user, domain)| !user.is_empty() && domain.contains('.'))
-}

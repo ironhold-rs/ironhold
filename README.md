@@ -48,7 +48,7 @@ Every app gets these with zero configuration:
 | Session fixation, open redirects | Login issues a new session id and CSRF token; `?next=` only redirects within the site |
 | Memory safety bugs | Rust, with `#![forbid(unsafe_code)]` in every framework crate |
 
-Coming next: form validation, a model layer with generated migrations, and live components (interactive pages without writing JavaScript). See [ARCHITECTURE.md](ARCHITECTURE.md) for the design and roadmap.
+Coming next: a model layer with generated migrations, and live components (interactive pages without writing JavaScript). See [ARCHITECTURE.md](ARCHITECTURE.md) for the design and roadmap.
 
 ## Getting started
 
@@ -132,6 +132,41 @@ For `fetch` requests, send the token in the `X-CSRF-Token` header instead.
 
 Without a database, sessions are kept in memory and are lost on restart. Connect a database (below) and they're stored there automatically.
 
+## Validation
+
+Write rules in plain Rust. `validate()` returns `Valid<T>` or the problems to show next to each field, and code that takes `Valid<T>` can't be called with unchecked input.
+
+```rust
+use ironhold::http::StatusCode;
+use ironhold::prelude::*;
+use ironhold::response::Response;
+use serde::Deserialize;
+
+#[derive(Deserialize)]
+struct NewPost {
+    title: String,
+    url: String,
+}
+
+impl Validate for NewPost {
+    fn rules(&self, v: &mut Validator) {
+        v.check("title", &self.title).required().max_chars(120);
+        v.check("url", &self.url).url(); // optional: only checked when filled in
+    }
+}
+
+async fn create_post(csrf: CsrfToken, Form(input): Form<NewPost>) -> Response {
+    match input.validate() {
+        Ok(post) => save(post).await,
+        // Re-render the form; in the template, `(errors.field("title"))`
+        // shows the title's problem next to its input.
+        Err(errors) => (StatusCode::UNPROCESSABLE_ENTITY, post_form(&csrf, &errors)).into_response(),
+    }
+}
+```
+
+Rules: `required`, `min_chars`, `max_chars`, `max_bytes`, `email`, `url`, `one_of`, `equals`, `custom`, and `min`/`max` for numbers. `.message(...)` replaces the message of the rule before it. For JSON APIs, return the errors as the response: a `422` with `{"errors": {"title": ["This field is required."]}}`.
+
 ## Login and access control
 
 ```rust
@@ -210,7 +245,7 @@ SQLite runs in WAL mode (readers never block the writer) with `synchronous=NORMA
 | [`ironhold-core`](crates/ironhold-core) | App builder, routing, config, errors, graceful shutdown |
 | [`ironhold-security`](crates/ironhold-security) | Security headers, CSP nonces, cross-origin protection, limits, `Secret<T>` |
 | [`ironhold-session`](crates/ironhold-session) | Server-side sessions and CSRF tokens |
-| [`ironhold-forms`](crates/ironhold-forms) | CSRF-checked `Form<T>` extractor |
+| [`ironhold-forms`](crates/ironhold-forms) | CSRF-checked `Form<T>` extractor and validation |
 | [`ironhold-db`](crates/ironhold-db) | SQLite and Postgres with tuned defaults, database-backed sessions |
 | [`ironhold-auth`](crates/ironhold-auth) | Passwords, login and logout, `AuthUser`, `Authorize`, login throttling |
 | [`ironhold-cli`](crates/ironhold-cli) | The `ironhold` command: `new` and `dev` |

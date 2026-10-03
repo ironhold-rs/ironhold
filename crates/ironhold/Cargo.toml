@@ -48,6 +48,10 @@ required-features = ["sqlite"]
 name = "auth"
 required-features = ["testing"]
 
+[[test]]
+name = "validation"
+required-features = ["testing"]
+
 [package.metadata.docs.rs]
 all-features = true
 

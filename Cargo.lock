@@ -1038,7 +1038,9 @@ dependencies = [
  "axum",
  "ironhold-core",
  "ironhold-session",
+ "maud",
  "serde",
+ "serde_json",
  "serde_urlencoded",
 ]
 

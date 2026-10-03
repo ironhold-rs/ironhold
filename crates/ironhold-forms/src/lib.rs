@@ -3,8 +3,16 @@
 //! [`Form<T>`] parses a `application/x-www-form-urlencoded` body into `T`,
 //! but only after checking the session's CSRF token. A handler that takes
 //! `Form<T>` can't run for a forged request, so there's nothing to forget.
+//!
+//! [`Validate`] checks the parsed input against rules written in plain Rust
+//! and returns [`Valid<T>`], or [`ValidationErrors`] to show next to each
+//! field.
 
 #![forbid(unsafe_code)]
+
+mod validate;
+
+pub use validate::{Check, NumberCheck, Valid, Validate, ValidationErrors, Validator};
 
 use axum::{
     body::Bytes,
