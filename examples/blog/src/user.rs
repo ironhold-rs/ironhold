@@ -1,0 +1,69 @@
+//! Users and their database queries.
+
+use ironhold::auth::PasswordHash;
+use ironhold::http::request::Parts;
+use ironhold::prelude::*;
+
+#[derive(Debug, Clone)]
+pub struct User {
+    pub id: i64,
+    pub email: String,
+}
+
+/// Lets handlers take `AuthUser<User>`: the id stored in the session is
+/// turned back into a `User` on each request.
+impl LoadUser for User {
+    type Id = i64;
+
+    async fn load_user(id: i64, parts: &mut Parts) -> Result<Option<Self>> {
+        let db = SqliteDb::from_parts(parts)?;
+        find_by_id(&db, id).await
+    }
+}
+
+pub async fn find_by_id(db: &SqliteDb, id: i64) -> Result<Option<User>> {
+    let row: Option<(i64, String)> = sqlx::query_as("SELECT id, email FROM users WHERE id = $1")
+        .bind(id)
+        .fetch_optional(db.pool())
+        .await?;
+    Ok(row.map(|(id, email)| User { id, email }))
+}
+
+/// The user with this email and their password hash, for logging in.
+pub async fn find_for_login(db: &SqliteDb, email: &str) -> Result<Option<(User, PasswordHash)>> {
+    let row: Option<(i64, String, String)> =
+        sqlx::query_as("SELECT id, email, password_hash FROM users WHERE email = $1")
+            .bind(email)
+            .fetch_optional(db.pool())
+            .await?;
+    Ok(row.map(|(id, email, hash)| (User { id, email }, PasswordHash::from_stored(hash))))
+}
+
+/// Creates a user, or returns `None` if the email is already registered.
+pub async fn create(
+    db: &SqliteDb,
+    email: &str,
+    password_hash: &PasswordHash,
+) -> Result<Option<User>> {
+    let inserted = sqlx::query_scalar::<_, i64>(
+        "INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id",
+    )
+    .bind(email)
+    .bind(password_hash.as_str())
+    .fetch_one(db.pool())
+    .await;
+
+    match inserted {
+        Ok(id) => Ok(Some(User {
+            id,
+            email: email.to_owned(),
+        })),
+        Err(sqlx::Error::Database(e)) if e.is_unique_violation() => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// Emails are compared case-insensitively, so store them lowercased.
+pub fn normalize_email(email: &str) -> String {
+    email.trim().to_lowercase()
+}

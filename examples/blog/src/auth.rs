@@ -1,0 +1,192 @@
+//! Sign up, log in and log out.
+
+use ironhold::auth::{self, safe_redirect_path};
+use ironhold::http::StatusCode;
+use ironhold::prelude::*;
+use ironhold::response::Response;
+use serde::Deserialize;
+
+use crate::layout::page;
+use crate::user;
+
+#[derive(Deserialize)]
+pub struct SignUpForm {
+    email: String,
+    // `Secret` keeps the password out of logs and debug output.
+    password: Secret<String>,
+}
+
+impl Validate for SignUpForm {
+    fn rules(&self, v: &mut Validator) {
+        v.check("email", &self.email).required().email();
+        v.check("password", self.password.expose())
+            .required()
+            .min_chars(auth::MIN_PASSWORD_CHARS)
+            .message(format!(
+                "Use at least {} characters. A few unrelated words make a strong, memorable password.",
+                auth::MIN_PASSWORD_CHARS
+            ))
+            .max_bytes(auth::MAX_PASSWORD_BYTES);
+    }
+}
+
+#[derive(Deserialize)]
+pub struct LoginForm {
+    email: String,
+    password: Secret<String>,
+    #[serde(default)]
+    next: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct NextPage {
+    next: Option<String>,
+}
+
+pub async fn signup_page(nonce: CspNonce, csrf: CsrfToken) -> Markup {
+    page(
+        &nonce,
+        "Sign up",
+        signup_form(&csrf, &ValidationErrors::new(), ""),
+    )
+}
+
+pub async fn signup(
+    nonce: CspNonce,
+    session: Session,
+    csrf: CsrfToken,
+    db: SqliteDb,
+    Form(mut form): Form<SignUpForm>,
+) -> Result<Response> {
+    form.email = user::normalize_email(&form.email);
+    let form = match form.validate() {
+        Ok(form) => form,
+        Err(invalid) => {
+            return Ok(invalid_signup(
+                &nonce,
+                &csrf,
+                &invalid.errors,
+                &invalid.input.email,
+            ));
+        }
+    };
+
+    let hash = auth::hash_password(&form.password).await?;
+    let Some(user) = user::create(&db, &form.email, &hash).await? else {
+        let errors = ValidationErrors::single(
+            "email",
+            "An account with this email already exists. Try logging in.",
+        );
+        return Ok(invalid_signup(&nonce, &csrf, &errors, &form.email));
+    };
+
+    auth::login(&session, &user.id).await?;
+    Ok(Redirect::to("/dashboard").into_response())
+}
+
+fn invalid_signup(
+    nonce: &CspNonce,
+    csrf: &CsrfToken,
+    errors: &ValidationErrors,
+    email: &str,
+) -> Response {
+    let form = signup_form(csrf, errors, email);
+    (
+        StatusCode::UNPROCESSABLE_ENTITY,
+        page(nonce, "Sign up", form),
+    )
+        .into_response()
+}
+
+pub async fn login_page(nonce: CspNonce, csrf: CsrfToken, Query(query): Query<NextPage>) -> Markup {
+    page(
+        &nonce,
+        "Log in",
+        login_form(&csrf, None, "", query.next.as_deref()),
+    )
+}
+
+pub async fn login(
+    nonce: CspNonce,
+    session: Session,
+    csrf: CsrfToken,
+    throttle: LoginThrottle,
+    db: SqliteDb,
+    Form(form): Form<LoginForm>,
+) -> Result<Response> {
+    let email = user::normalize_email(&form.email);
+    // 429 after too many failures for this account.
+    throttle.check(&email)?;
+
+    let found = user::find_for_login(&db, &email).await?;
+    // With no matching user this still does the full check, so the response
+    // time doesn't reveal which emails have accounts.
+    let verified =
+        auth::verify_password(found.as_ref().map(|(_, hash)| hash), &form.password).await?;
+
+    match found {
+        Some((user, _)) if verified => {
+            throttle.record_success(&email);
+            auth::login(&session, &user.id).await?;
+            let next = safe_redirect_path(form.next.as_deref(), "/dashboard");
+            Ok(Redirect::to(next).into_response())
+        }
+        _ => {
+            throttle.record_failure(&email);
+            let form = login_form(
+                &csrf,
+                Some("Invalid email or password."),
+                &email,
+                form.next.as_deref(),
+            );
+            Ok((StatusCode::UNAUTHORIZED, page(&nonce, "Log in", form)).into_response())
+        }
+    }
+}
+
+#[derive(Deserialize)]
+pub struct LogoutForm {}
+
+pub async fn logout(session: Session, Form(_): Form<LogoutForm>) -> Result<Redirect> {
+    auth::logout(&session).await?;
+    Ok(Redirect::to("/"))
+}
+
+fn signup_form(csrf: &CsrfToken, errors: &ValidationErrors, email: &str) -> Markup {
+    html! {
+        h1 { "Create your account" }
+        form method="post" action="/signup" novalidate {
+            (csrf)
+            label {
+                "Email"
+                input type="email" name="email" value=(email) autocomplete="email" required
+                    aria-invalid=[errors.aria_invalid("email")] aria-describedby=[errors.described_by("email")];
+            }
+            (errors.field("email"))
+            label {
+                "Password"
+                input type="password" name="password" autocomplete="new-password"
+                    minlength=(auth::MIN_PASSWORD_CHARS) required
+                    aria-invalid=[errors.aria_invalid("password")] aria-describedby=[errors.described_by("password")];
+            }
+            (errors.field("password"))
+            button { "Sign up" }
+        }
+        p { "Already have an account? " a href="/login" { "Log in" } }
+    }
+}
+
+fn login_form(csrf: &CsrfToken, problem: Option<&str>, email: &str, next: Option<&str>) -> Markup {
+    html! {
+        h1 { "Log in" }
+        @if let Some(problem) = problem { p.error role="alert" { (problem) } }
+        form method="post" action="/login" {
+            (csrf)
+            @if let Some(next) = next { input type="hidden" name="next" value=(next); }
+            label { "Email" input type="email" name="email" value=(email) autocomplete="email" required; }
+            label { "Password" input type="password" name="password" autocomplete="current-password" required; }
+            button { "Log in" }
+        }
+        p { "New here? " a href="/signup" { "Create an account" } }
+    }
+}

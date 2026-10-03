@@ -1,0 +1,23 @@
+[package]
+name = "blog"
+description = "The blog built in the Ironhold tutorial (docs/tutorial.md)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+ironhold = { workspace = true, features = ["sqlite"] }
+maud.workspace = true
+serde.workspace = true
+sqlx = { workspace = true, features = ["macros", "migrate", "sqlite-bundled"] }
+tokio.workspace = true
+
+[dev-dependencies]
+ironhold = { workspace = true, features = ["testing"] }
+
+# An app, not framework code: it doesn't take the framework's stricter
+# workspace lints (no unwrap anywhere, docs on every public item).
+[lints.rust]
+unsafe_code = "forbid"

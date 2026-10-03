@@ -79,6 +79,8 @@ cd my-app && ironhold dev
 
 Open <http://127.0.0.1:3000>. `ironhold dev` rebuilds and restarts the app every time you save; if a change doesn't compile, the last working version keeps running. Use `--db postgres` for Postgres instead of SQLite.
 
+Next, follow the [tutorial](docs/tutorial.md) to build a blog with posts, validation and permissions in about 30 minutes. The finished code is in [`examples/blog`](examples/blog).
+
 The new app comes with tests that drive it like a browser:
 
 ```bash

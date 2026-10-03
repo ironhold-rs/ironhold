@@ -48,6 +48,7 @@ crates/
   ironhold-cli        the `ironhold` command: `new` and `dev`
 examples/
   hello               minimal app
+  blog                the blog from docs/tutorial.md: posts, validation, permissions, tests
 ```
 
 Planned: `ironhold-model` (models, typed queries, generated migrations), `ironhold-live` (live components), `ironhold-jobs`, `ironhold-mail`, `ironhold-admin`, `ironhold-islands` and `ironhold-inertia`.
@@ -92,7 +93,7 @@ Layers run in this order for every request:
 | Phase | Scope |
 |---|---|
 | 0: Foundation (done) | Workspace, App builder, security headers, config, CI |
-| 1: v0.1 | Done: sessions, cross-origin checks, CSRF-checked forms, overload protection, SQLite and Postgres support, database-backed sessions, auth, test client, `ironhold new`, `ironhold dev`, form validation. Remaining: a `blog` example, documentation |
+| 1: v0.1 | Done: sessions, cross-origin checks, CSRF-checked forms, overload protection, SQLite and Postgres support, database-backed sessions, auth, test client, `ironhold new`, `ironhold dev`, form validation, the `blog` example and tutorial. Remaining: the v0.1 release |
 | 2: v0.2 | Model layer and generators, live components, template hot reload |
 | 3: v0.3 | Jobs, scheduler, mail, file storage, cache, real-time updates, admin panel, deployment command |
 | 4: v0.4 | WebAssembly islands, Inertia adapter, OpenAPI for JSON APIs, translations |
