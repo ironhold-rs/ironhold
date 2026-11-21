@@ -230,11 +230,7 @@ mod sqlite {
                 let mut list = query.separated(", ");
                 list.push_bind(email).push_bind("nobody@x");
                 list.push_unseparated(")");
-                let rows: Vec<String> = query
-                    .build_query_scalar()
-                    .fetch_all(&*db)
-                    .await
-                    .unwrap();
+                let rows: Vec<String> = query.build_query_scalar().fetch_all(&*db).await.unwrap();
                 rows
             }
         };
