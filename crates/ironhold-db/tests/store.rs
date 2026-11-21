@@ -13,6 +13,15 @@ use std::collections::HashMap;
 use tower_sessions::cookie::time::{Duration, OffsetDateTime};
 use tower_sessions::session::{Id, Record};
 
+/// What the store should keep in the `id` column: SHA-256 of the id, in hex.
+fn hashed(id: &Id) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(id.to_string().as_bytes())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
 fn record(ttl: Duration) -> Record {
     Record {
         id: Id::default(),
@@ -30,7 +39,7 @@ macro_rules! store_tests {
         use ironhold_db::DbSessionStore;
         use tower_sessions::session_store::{ExpiredDeletion, SessionStore};
 
-        use super::record;
+        use super::{hashed, record};
         use tower_sessions::cookie::time::Duration;
 
         #[tokio::test]
@@ -43,7 +52,7 @@ macro_rules! store_tests {
                     .fetch_all(&*db)
                     .await
                     .unwrap();
-            assert_eq!(versions, vec![1]);
+            assert_eq!(versions, vec![1, 2]);
         }
 
         #[tokio::test]
@@ -81,14 +90,43 @@ macro_rules! store_tests {
             store.create(&mut expired).await.unwrap();
             assert!(store.load(&expired.id).await.unwrap().is_none());
 
+            let count = |id: String| {
+                let pool = db.pool().clone();
+                async move {
+                    sqlx::query_scalar::<_, i64>(
+                        "SELECT COUNT(*) FROM ironhold_sessions WHERE id = $1",
+                    )
+                    .bind(id)
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap()
+                }
+            };
+            assert_eq!(count(hashed(&expired.id)).await, 1);
             store.delete_expired().await.unwrap();
-            let remaining: i64 =
-                sqlx::query_scalar("SELECT COUNT(*) FROM ironhold_sessions WHERE id = $1")
-                    .bind(expired.id.to_string())
-                    .fetch_one(&*db)
+            assert_eq!(count(hashed(&expired.id)).await, 0);
+        }
+
+        #[tokio::test]
+        async fn session_ids_are_stored_hashed() {
+            let Some((url, _guard)) = $setup else { return };
+            let db = <$Db>::connect(&url).await.unwrap();
+            let store = DbSessionStore::new(db.clone());
+
+            let mut session = record(Duration::hours(1));
+            store.create(&mut session).await.unwrap();
+            store.save(&session).await.unwrap();
+
+            let stored: Vec<String> =
+                sqlx::query_scalar("SELECT id FROM ironhold_sessions WHERE id IN ($1, $2)")
+                    .bind(session.id.to_string())
+                    .bind(hashed(&session.id))
+                    .fetch_all(&*db)
                     .await
                     .unwrap();
-            assert_eq!(remaining, 0);
+            // Reading the table doesn't give away the cookie value.
+            assert_eq!(stored, vec![hashed(&session.id)]);
+            assert!(store.load(&session.id).await.unwrap().is_some());
         }
 
         #[tokio::test]
@@ -142,6 +180,64 @@ mod sqlite {
     }
 
     store_tests!(SqliteDb, temp_sqlite());
+
+    #[tokio::test]
+    async fn sessions_from_before_hashing_are_removed() {
+        let (url, _guard) = temp_sqlite().unwrap();
+        let db = SqliteDb::connect(&url).await.unwrap();
+        // An app upgrading from 0.1 has a plain id stored and no migration 2.
+        // (SQLite only: on the shared Postgres test database this would
+        // delete other tests' sessions.)
+        let plain = tower_sessions::session::Id::default().to_string();
+        sqlx::query("INSERT INTO ironhold_sessions (id, data, expires_at) VALUES ($1, '{}', $2)")
+            .bind(&plain)
+            .bind(i64::MAX)
+            .execute(&*db)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM ironhold_migrations WHERE version = 2")
+            .execute(&*db)
+            .await
+            .unwrap();
+        let db = SqliteDb::connect(&url).await.unwrap();
+        let left: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM ironhold_sessions WHERE id = $1")
+            .bind(&plain)
+            .fetch_one(&*db)
+            .await
+            .unwrap();
+        assert_eq!(left, 0);
+    }
+
+    #[tokio::test]
+    async fn query_builder_binds_runtime_values() {
+        let (url, _guard) = temp_sqlite().unwrap();
+        let db = SqliteDb::connect(&url).await.unwrap();
+        sqlx::query("CREATE TABLE users (email TEXT, secret TEXT)")
+            .execute(&*db)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO users VALUES ('a@x', 'alice'), ('b@x', 'bob')")
+            .execute(&*db)
+            .await
+            .unwrap();
+
+        let find = |email: &'static str| {
+            let db = db.clone();
+            async move {
+                let mut query = ironhold_db::QueryBuilder::<sqlx::Sqlite>::new(
+                    "SELECT secret FROM users WHERE email IN (",
+                );
+                let mut list = query.separated(", ");
+                list.push_bind(email).push_bind("nobody@x");
+                list.push_unseparated(")");
+                let rows: Vec<String> = query.build_query_scalar().fetch_all(&*db).await.unwrap();
+                rows
+            }
+        };
+        assert_eq!(find("a@x").await, vec!["alice".to_owned()]);
+        // The classic injection is just an email that matches nobody.
+        assert!(find("nobody' OR '1'='1").await.is_empty());
+    }
 
     #[tokio::test]
     async fn sqlite_uses_wal_and_foreign_keys() {

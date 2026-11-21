@@ -57,13 +57,16 @@ Planned: `ironhold-model` (models, typed queries, generated migrations), `ironho
 
 Layers run in this order for every request:
 
+0. Connections: headers must arrive within 10 s, idle connections close after 10 s, at most 10,000 connections are open, and shutdown waits at most 10 s for requests in progress.
 1. Security headers and the request's CSP nonce. This layer is outermost so even error responses carry the headers.
-2. Overload protection: past 1024 requests in flight, an immediate `503` with `Retry-After`.
+2. Working out the client's address, using `X-Forwarded-For` only from trusted proxies.
 3. Cross-origin check for POST, PUT, PATCH and DELETE.
-4. Request body size limit (2 MiB) and request timeout (30 s).
-5. Request tracing, and turning handler panics into `500` responses.
-6. Session loading.
-7. The router and the handler's extractors: `Form<T>` (checks the CSRF token), `CsrfToken`, `Session`, `AuthUser<U>`, `Authorize<U, P>`, `Db`, `Path<T>`, `Query<T>` and so on.
+4. Reading the request body: size limit (2 MiB), 10 s deadline (longer only at 1 KiB/s or more), at most 32 uploads in progress per client. This comes before overload protection so slow uploads can't hold in-flight slots.
+5. Overload protection: past 1024 requests in flight, an immediate `503` with `Retry-After`.
+6. Request timeout (30 s).
+7. Request tracing, and turning handler panics into `500` responses.
+8. Session loading.
+9. The router and the handler's extractors: `Form<T>` (checks the CSRF token), `CsrfToken`, `Session`, `AuthUser<U>`, `Authorize<U, P>`, `Db`, `Path<T>`, `Query<T>` and so on.
 
 ## Security mechanisms
 
@@ -71,15 +74,15 @@ Layers run in this order for every request:
 |---|---|
 | XSS | Templates escape every interpolated value. Raw HTML needs `raw_unchecked(...)`. |
 | Script injection | Content-Security-Policy with a new nonce per request; inline scripts and styles need the nonce. |
-| SQL injection | sqlx 0.9 only accepts SQL written as string literals (dynamic SQL needs an explicit `AssertSqlSafe`), and values are passed with `.bind()`. |
+| SQL injection | `sqlx::query` only accepts SQL written as string literals (dynamic SQL needs an explicit `AssertSqlSafe`), and values are passed with `.bind()`. Queries built at runtime use `ironhold::db::QueryBuilder`, which only takes literals and bound values (`push_unchecked` is the named opt-out). sqlx's `QueryBuilder` accepts any string, so `clippy.toml` in this repository and in generated apps forbids it. |
 | CSRF | Cross-origin POST, PUT, PATCH and DELETE requests are rejected using `Sec-Fetch-Site`, falling back to comparing `Origin` with `Host`. `Form<T>` also requires the session's CSRF token. axum's unchecked `Form` isn't re-exported. |
 | Broken access control | A handler that takes `AuthUser<U>` can't run for logged-out visitors, and `Authorize<U, P>` can't run unless policy `P` allows the user. |
-| Session theft and fixation | Server-side sessions with random 128-bit IDs. Cookies are `HttpOnly` and `SameSite=Lax`, and `Secure` with the `__Host-` prefix in production. Login issues a new session ID and CSRF token. |
-| Password storage | Argon2id with the OWASP-recommended parameters, pinned in code. Plaintext passwords are held in `Secret<String>`, which can't be logged or serialized. |
-| Password guessing | 5 failed logins per account per 5 minutes, then `429`. Unknown accounts take as long to check as real ones. |
+| Session theft and fixation | Server-side sessions with random 128-bit IDs, stored in the database as SHA-256 hashes. Cookies are `HttpOnly` and `SameSite=Lax`, and `Secure` with the `__Host-` prefix in production. Login issues a new session ID and CSRF token. |
+| Password storage | Argon2id with the OWASP-recommended parameters, pinned in code. At most one hash per CPU core runs at a time, and a hash's slot is held until it finishes even if the client hangs up. Plaintext passwords are held in `Secret<String>`, which can't be logged or serialized. |
+| Password guessing | 5 failed logins per account and client address per 5 minutes, then `429`. An attempt is reserved before the password check, so concurrent guesses count. Unknown accounts take as long to check as real ones. |
 | Open redirects | `safe_redirect_path` only allows paths on the same site. |
 | Clickjacking, MIME sniffing | `frame-ancestors 'none'`, `X-Frame-Options`, `nosniff`, COOP and CORP headers; HSTS in production. |
-| Denial of service | Body size limits, request timeouts, a cap on requests in flight, and a database connection timeout. |
+| Denial of service | Header, idle and body timeouts, body size limits, a per-client cap on uploads, request timeouts, a cap on requests in flight that slow uploads can't use up, a connection cap, a shutdown deadline, a bounded in-memory session store, and a database connection timeout. |
 | Vulnerable dependencies | CI runs `cargo-deny` for security advisories, licences and sources. |
 
 ## Front end
@@ -118,11 +121,13 @@ Published benchmarks will run on a small cloud server with the load generator on
 | sqlx 0.9 for database access | Async, supports SQLite and Postgres, compile-time checked queries for apps, and only accepts SQL literals. SeaORM 2.0 also builds on sqlx, so the model layer decision stays open | No plans |
 | sqlx's `sqlite-bundled` feature instead of `sqlite` | The full feature also enables loading native SQLite extensions at runtime, which we don't need | When an app needs extensions |
 | Framework tables tracked in `ironhold_migrations` | Kept apart from sqlx's `_sqlx_migrations`, so framework upgrades never clash with app migrations. On Postgres they run under an advisory lock so several instances can start at once | No plans |
-| Remote Postgres requires TLS unless the URL sets `sslmode` | sqlx's default (`prefer`) falls back to plain text, which a network attacker can force | No plans |
+| Remote Postgres uses `sslmode=verify-full` unless the URL or `PGSSLMODE` sets `sslmode` | sqlx's default (`prefer`) falls back to plain text, which a network attacker can force, and `require` accepts any certificate, so the same attacker can pose as the database. Weaker modes have to be written into the URL, and Ironhold logs a warning for them | No plans |
 | Cap of 1024 requests in flight, then `503` | When a server is overloaded, latency climbs for everyone. Rejecting extra work early keeps accepted requests fast | After the first published benchmark |
 | Login checks in extractors, not middleware | A route can't skip the check through a middleware bypass (the kind of bug behind CVE-2025-29927). A handler without `AuthUser` is visibly public in code review | No plans |
 | Argon2id parameters pinned in code | A library update can't change hashing silently. Verification reads parameters from each stored hash, so raising them later is safe | No plans |
-| Login throttle kept in memory, per account | No setup, and it stops guessing against one account. It doesn't share counts between instances or limit per IP address yet | When the database-backed cache lands (phase 3) |
+| Login throttle kept in memory, per account and client address | No setup, and it stops guessing against one account from one place. Keying on the account alone let anyone lock a user out with five wrong guesses; with the client address, the owner still gets in from their own address. The cost is that an attacker with many addresses gets five guesses from each (IPv6 grouped per `/64`), which the 12 character minimum makes affordable. Counts aren't shared between instances | When the database-backed cache lands (phase 3) |
+| Request bodies read before overload protection | A slow upload would otherwise hold an in-flight slot for the whole request timeout, so a thousand slow clients could make everyone else get `503`. Bodies are at most 2 MiB, and handlers parse the whole body anyway | When streaming uploads are needed (file storage, phase 3) |
+| Serving with hyper directly instead of `axum::serve` | `axum::serve` runs hyper without a timer, which turns off hyper's header read timeout, and it has no shutdown deadline | When axum exposes these settings |
 | Minimum password length 12, no composition rules | Length matters more than character classes, and composition rules push people towards predictable patterns | No plans |
 | Generated apps use runtime-checked SQL | `query!` needs a database at compile time, which would break `ironhold new` followed by `ironhold dev` on a fresh machine. Values are still always bound | Phase 2, with the model layer |
 | `ironhold dev` rebuilds, then restarts | If a build fails, the last working version keeps running, so the browser never hits a dead server mid-edit. Hot-patching is a later step | Phase 2 |

@@ -75,18 +75,18 @@ async fn login(
     Extension(users): Extension<Users>,
     Form(form): Form<LoginForm>,
 ) -> Result<Response> {
-    throttle.check(&form.email)?;
+    let attempt = throttle.begin(&form.email)?;
     let found = users.find_by_email(&form.email);
     let verified = auth::verify_password(found.as_ref().map(|(_, h)| h), &form.password).await?;
     match found {
         Some((user, _)) if verified => {
-            throttle.record_success(&form.email);
+            attempt.succeeded();
             auth::login(&session, &user.id).await?;
             let next = safe_redirect_path(form.next.as_deref(), "/dashboard");
             Ok(Redirect::to(next).into_response())
         }
         _ => {
-            throttle.record_failure(&form.email);
+            attempt.failed();
             Ok((StatusCode::UNAUTHORIZED, "Invalid email or password.").into_response())
         }
     }
@@ -113,6 +113,11 @@ async fn admin(admin: Authorize<User, Admins>) -> String {
 }
 
 async fn app() -> (TestClient, Users) {
+    let (app, users) = build_app().await;
+    (TestClient::new(app), users)
+}
+
+async fn build_app() -> (App, Users) {
     let users = Users::default();
     for (id, email, is_admin) in [
         (1, "raj@example.com", false),
@@ -142,7 +147,7 @@ async fn app() -> (TestClient, Users) {
             "/api/me",
             get(|user: AuthUser<User>| async move { user.email.clone() }),
         );
-    (TestClient::new(app), users)
+    (app, users)
 }
 
 async fn log_in(client: &mut TestClient, email: &str) -> ironhold::testing::TestResponse {
@@ -327,4 +332,71 @@ async fn logout_ends_the_session() {
         response.headers().get(header::LOCATION).unwrap(),
         "/login?next=%2Fdashboard"
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_guesses_cannot_get_past_the_limit() {
+    let (app, _) = build_app().await;
+    let router = app.into_router();
+    let mut client = TestClient::from_router(router.clone());
+    client.get("/login").await;
+    let cookie = format!("id={}", client.cookie("id").unwrap());
+    let token = client.csrf_token().unwrap().to_owned();
+
+    // 50 wrong passwords for one account, all sent at once.
+    let guesses: Vec<_> = (0..50)
+        .map(|i| {
+            let body = format!("email=raj%40example.com&password=guess{i}&_csrf={token}");
+            let request = Request::post("/login")
+                .header(header::COOKIE, &cookie)
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .header("sec-fetch-site", "same-origin")
+                .body(Body::from(body))
+                .unwrap();
+            let router = router.clone();
+            tokio::spawn(async move {
+                use tower::ServiceExt;
+                router.oneshot(request).await.unwrap().status()
+            })
+        })
+        .collect();
+    let mut checked = 0;
+    for guess in guesses {
+        match guess.await.unwrap() {
+            StatusCode::UNAUTHORIZED => checked += 1,
+            StatusCode::TOO_MANY_REQUESTS => {}
+            other => panic!("unexpected {other}"),
+        }
+    }
+    assert!(checked <= 5, "{checked} passwords were checked, limit 5");
+}
+
+#[tokio::test]
+async fn an_attacker_cannot_lock_out_the_real_user() {
+    let (app, _) = build_app().await;
+    let router = app.into_router();
+    let mut attacker = TestClient::from_router(router.clone())
+        .with_client_addr("203.0.113.66:5000".parse().unwrap());
+    attacker.get("/login").await;
+    for i in 0..5 {
+        let response = attacker
+            .post_form(
+                "/login",
+                &[
+                    ("email", "RAJ@example.com"),
+                    ("password", &format!("guess {i}")),
+                ],
+            )
+            .await;
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+    let response = log_in(&mut attacker, "raj@example.com").await;
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+
+    // The owner, from their own address, still gets in.
+    let mut owner =
+        TestClient::from_router(router).with_client_addr("198.51.100.7:6000".parse().unwrap());
+    let response = log_in(&mut owner, "raj@example.com").await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(response.location(), Some("/dashboard"));
 }

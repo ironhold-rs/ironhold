@@ -12,10 +12,12 @@
 
 mod config;
 mod csrf;
+mod memory_store;
 
 pub use config::SessionConfig;
 pub use csrf::{CSRF_FIELD, CSRF_HEADER, CsrfToken};
-pub use tower_sessions::{MemoryStore, Session, SessionStore};
+pub use memory_store::{DEFAULT_MAX_SESSIONS, MemoryStore};
+pub use tower_sessions::{Session, SessionStore};
 
 use tower_sessions::{
     Expiry, SessionManagerLayer,

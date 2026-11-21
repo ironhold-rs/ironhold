@@ -1,10 +1,23 @@
-use std::{env, net::SocketAddr};
+use std::{env, net::SocketAddr, time::Duration};
 
-use ironhold_security::SecurityConfig;
+use ironhold_security::{IpRange, SecurityConfig};
 use ironhold_session::SessionConfig;
 
 /// Which environment the app runs in. Controls secure defaults such as HSTS.
+///
+/// More environments may be added, so a `match` needs a `_` arm:
+///
+/// ```compile_fail
+/// # use ironhold_core::Environment;
+/// fn name(environment: Environment) -> &'static str {
+///     match environment {
+///         Environment::Development => "development",
+///         Environment::Production => "production",
+///     }
+/// }
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Environment {
     /// Local development.
     Development,
@@ -25,6 +38,11 @@ pub struct Config {
     pub security: SecurityConfig,
     /// Session cookie settings.
     pub session: SessionConfig,
+    /// How long shutting down waits for requests in progress. Connections
+    /// still open after this are closed, so a slow or stuck client can't
+    /// keep the server running. Set it below the grace period of whatever
+    /// stops the app (Docker waits 10 seconds, Kubernetes 30).
+    pub shutdown_timeout: Duration,
 }
 
 /// A configuration value that couldn't be parsed. The app refuses to start
@@ -51,6 +69,7 @@ impl Config {
             addr: SocketAddr::from(([127, 0, 0, 1], 3000)),
             security,
             session,
+            shutdown_timeout: Duration::from_secs(10),
         }
     }
 
@@ -58,6 +77,9 @@ impl Config {
     ///
     /// - `IRONHOLD_ENV`: `development` (default) or `production`
     /// - `IRONHOLD_ADDR`: listen address, e.g. `0.0.0.0:8080`
+    /// - `IRONHOLD_TRUSTED_PROXIES`: reverse proxies in front of the app,
+    ///   as comma-separated addresses or CIDR ranges, e.g.
+    ///   `127.0.0.1,10.0.0.0/8` (see [`SecurityConfig::trusted_proxies`])
     pub fn from_env() -> Result<Self, ConfigError> {
         let environment = match env::var("IRONHOLD_ENV").ok().as_deref() {
             None | Some("development") => Environment::Development,
@@ -81,6 +103,15 @@ impl Config {
             })?;
         }
 
+        if let Ok(proxies) = env::var("IRONHOLD_TRUSTED_PROXIES") {
+            config.security.trusted_proxies =
+                parse_trusted_proxies(&proxies).ok_or_else(|| ConfigError {
+                    var: "IRONHOLD_TRUSTED_PROXIES",
+                    value: proxies.clone(),
+                    reason: "expected comma-separated IP addresses or CIDR ranges like `10.0.0.0/8`",
+                })?;
+        }
+
         Ok(config)
     }
 }
@@ -88,5 +119,28 @@ impl Config {
 impl Default for Config {
     fn default() -> Self {
         Self::new(Environment::Development)
+    }
+}
+
+/// `None` if any entry is invalid. Empty entries are skipped, so a trailing
+/// comma is fine.
+fn parse_trusted_proxies(list: &str) -> Option<Vec<IpRange>> {
+    list.split(',')
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .map(|entry| entry.parse().ok())
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_trusted_proxies;
+
+    #[test]
+    fn trusted_proxies_parse_strictly() {
+        let proxies = parse_trusted_proxies("127.0.0.1, 10.0.0.0/8,fd00::/8,").unwrap();
+        assert_eq!(proxies.len(), 3);
+        assert!(parse_trusted_proxies("10.0.0.0/8, proxy.internal").is_none());
+        assert_eq!(parse_trusted_proxies("").unwrap().len(), 0);
     }
 }

@@ -15,6 +15,11 @@ pub struct DbConfig {
     /// Replace connections after this long, which picks up database
     /// failovers and limits slow memory growth on the database server.
     pub max_lifetime: Option<Duration>,
+    /// Prepared statements each connection keeps, so a query the app runs
+    /// again isn't parsed and planned again. 100 covers every distinct
+    /// query of a typical app; the least recently used one is dropped
+    /// beyond that.
+    pub statement_cache_capacity: usize,
 }
 
 impl DbConfig {
@@ -39,6 +44,7 @@ impl DbConfig {
             acquire_timeout: Duration::from_secs(5),
             idle_timeout: Some(Duration::from_secs(10 * 60)),
             max_lifetime: Some(Duration::from_secs(30 * 60)),
+            statement_cache_capacity: 100,
         }
     }
 }

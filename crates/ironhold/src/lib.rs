@@ -29,7 +29,8 @@
 //! - CSRF tokens checked by the [`Form`] extractor ([`CsrfToken`])
 //! - Validation that returns [`Valid<T>`], so unchecked input can't reach
 //!   code that requires checked input
-//! - Request body size limits and request timeouts
+//! - Request body size limits and timeouts, header and idle timeouts, and
+//!   a per-client cap on uploads in progress
 //! - Auto-escaping HTML templates ([`html!`])
 //! - Error responses that never leak internal details ([`Error`])
 //! - Login and access control enforced by types ([`auth`])
@@ -45,7 +46,7 @@ pub use ironhold_core::{App, Config, ConfigError, Environment, Error, Result};
 pub use ironhold_core::{Router, body, extract, http, response, routing};
 pub use ironhold_forms::{Form, Invalid, Valid, Validate, ValidationErrors, Validator};
 pub use ironhold_html::{DOCTYPE, Markup, Render, html, raw_unchecked};
-pub use ironhold_security::{CspNonce, Secret, SecurityConfig};
+pub use ironhold_security::{ClientIp, CspNonce, IpRange, Secret, SecurityConfig};
 pub use ironhold_session::{CsrfToken, MemoryStore, Session, SessionConfig, SessionStore};
 
 /// Authentication and authorization: passwords, login, `AuthUser`,
@@ -73,13 +74,15 @@ pub mod crates {
 
 /// Everything most apps need: `use ironhold::prelude::*;`
 pub mod prelude {
-    pub use crate::auth::{AuthUser, Authorize, LoadUser, LoginThrottle, Permission, Policy};
+    pub use crate::auth::{
+        AuthUser, Authorize, LoadUser, LoginAttempt, LoginThrottle, Permission, Policy,
+    };
     pub use crate::extract::{Json, Path, Query, State};
     pub use crate::response::{IntoResponse, Redirect};
     pub use crate::routing::{delete, get, patch, post, put};
     pub use crate::{
-        App, CspNonce, CsrfToken, DOCTYPE, Error, Form, Invalid, Markup, Result, Secret, Session,
-        Valid, Validate, ValidationErrors, Validator, html,
+        App, ClientIp, CspNonce, CsrfToken, DOCTYPE, Error, Form, Invalid, Markup, Result, Secret,
+        Session, Valid, Validate, ValidationErrors, Validator, html,
     };
 
     #[cfg(feature = "postgres")]
@@ -87,5 +90,5 @@ pub mod prelude {
     #[cfg(feature = "sqlite")]
     pub use crate::db::SqliteDb;
     #[cfg(any(feature = "sqlite", feature = "postgres"))]
-    pub use crate::db::{AppDatabaseExt, Db};
+    pub use crate::db::{AppDatabaseExt, Db, QueryBuilder};
 }

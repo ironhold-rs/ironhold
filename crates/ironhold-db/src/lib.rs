@@ -22,13 +22,18 @@
 //!
 //! - SQLite runs in WAL mode (readers never block the writer) with
 //!   `synchronous=NORMAL`, foreign keys on and a 5 second busy timeout.
-//! - Remote Postgres connections require TLS unless the URL sets `sslmode`.
+//! - Remote Postgres connections use TLS and verify the server's
+//!   certificate and host name (`sslmode=verify-full`) unless the URL sets
+//!   `sslmode`.
 //! - A request waits at most 5 seconds for a free connection, then fails
 //!   instead of piling up.
 //!
-//! sqlx 0.9 only accepts SQL written as string literals; building SQL from
-//! runtime strings needs an explicit `AssertSqlSafe`. Values always go
-//! through `.bind()`, so SQL injection needs a deliberate opt-out.
+//! `sqlx::query` and friends only accept SQL written as string literals;
+//! SQL from runtime strings needs an explicit `AssertSqlSafe`. For queries
+//! built at runtime use [`QueryBuilder`], which also only accepts literals
+//! and bound values (runtime SQL needs `push_unchecked`). sqlx's own
+//! `sqlx::QueryBuilder` accepts any string, so Ironhold's `clippy.toml`,
+//! and the one in apps made by `ironhold new`, forbid it.
 
 #![forbid(unsafe_code)]
 // With no backend feature enabled there's nothing to use the shared code.
@@ -44,6 +49,7 @@ mod config;
 mod db;
 #[cfg(feature = "postgres")]
 mod postgres;
+mod query_builder;
 mod schema;
 mod session_store;
 #[cfg(feature = "sqlite")]
@@ -52,6 +58,7 @@ mod sqlite;
 pub use app::AppDatabaseExt;
 pub use config::DbConfig;
 pub use db::Db;
+pub use query_builder::{QueryBuilder, Separated};
 pub use session_store::DbSessionStore;
 pub use sqlx;
 

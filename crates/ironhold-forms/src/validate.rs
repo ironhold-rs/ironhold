@@ -61,7 +61,18 @@ pub trait Validate: Sized {
 /// In an HTML handler, show the form again from `input` with `errors` next
 /// to each field. In a JSON API, return it as the response: a `422` with
 /// the errors.
+///
+/// Its fields can be read, but more may be added, so only validation
+/// builds one:
+///
+/// ```compile_fail
+/// let invalid = ironhold_forms::Invalid {
+///     input: (),
+///     errors: ironhold_forms::ValidationErrors::new(),
+/// };
+/// ```
 #[derive(Debug)]
+#[non_exhaustive]
 pub struct Invalid<T> {
     /// The input as submitted.
     pub input: T,

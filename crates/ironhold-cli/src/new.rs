@@ -35,6 +35,7 @@ const FILES: &[File] = &[
     same!("Cargo.toml", "Cargo.toml.tmpl"),
     same!("README.md", "README.md.tmpl"),
     same!(".gitignore", "gitignore.tmpl"),
+    same!("clippy.toml", "clippy.toml.tmpl"),
     File {
         path: ".env.example",
         sqlite: template!("env.example.sqlite.tmpl"),

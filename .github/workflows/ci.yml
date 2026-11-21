@@ -89,6 +89,9 @@ jobs:
           cargo test
       - name: Postgres app (tests must run, not skip)
         working-directory: ${{ runner.temp }}/pg-app
+        # bash with pipefail, so a failing `cargo test` fails the step even
+        # though its output goes through `tee`.
+        shell: bash
         run: |
           cargo clippy --all-targets -- -D warnings
           cargo test -- --nocapture 2>&1 | tee test-output.txt

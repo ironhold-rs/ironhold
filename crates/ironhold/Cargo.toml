@@ -33,7 +33,7 @@ tower = { workspace = true, optional = true }
 
 [dev-dependencies]
 getrandom.workspace = true
-http-body-util.workspace = true
+http-body-util = { workspace = true, features = ["channel"] }
 maud.workspace = true
 serde.workspace = true
 sqlx.workspace = true
