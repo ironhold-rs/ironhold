@@ -79,8 +79,23 @@ pub trait LoadUser: Clone + Send + Sync + 'static {
 /// - other requests (forms, `fetch`, APIs) get `401 Unauthorized`
 ///
 /// Take `Option<AuthUser<U>>` for pages that work either way.
+///
+/// Only this extractor can create an `AuthUser`, so a function that takes
+/// one can only be called with a user who really logged in:
+///
+/// ```compile_fail
+/// # #[derive(Clone)] struct User;
+/// let forged = ironhold_auth::AuthUser(User);
+/// ```
 #[derive(Debug, Clone)]
-pub struct AuthUser<U>(pub U);
+pub struct AuthUser<U>(U);
+
+impl<U> AuthUser<U> {
+    /// The logged-in user.
+    pub fn into_user(self) -> U {
+        self.0
+    }
+}
 
 impl<U> Deref for AuthUser<U> {
     type Target = U;
@@ -181,8 +196,9 @@ where
     type Rejection = Response;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        let AuthUser(user) =
-            <AuthUser<U> as FromRequestParts<S>>::from_request_parts(parts, state).await?;
+        let user = <AuthUser<U> as FromRequestParts<S>>::from_request_parts(parts, state)
+            .await?
+            .into_user();
         if P::allows(&user) {
             Ok(Self {
                 user,

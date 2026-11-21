@@ -18,17 +18,27 @@ pub(crate) const CREATE_MIGRATIONS_TABLE: &str = "CREATE TABLE IF NOT EXISTS iro
      description TEXT NOT NULL, \
      applied_at BIGINT NOT NULL)";
 
-pub(crate) const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    description: "create sessions table",
-    statements: &[
-        "CREATE TABLE ironhold_sessions (\
-         id TEXT PRIMARY KEY NOT NULL, \
-         data TEXT NOT NULL, \
-         expires_at BIGINT NOT NULL)",
-        "CREATE INDEX ironhold_sessions_expires_at ON ironhold_sessions (expires_at)",
-    ],
-}];
+pub(crate) const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        description: "create sessions table",
+        statements: &[
+            "CREATE TABLE ironhold_sessions (\
+             id TEXT PRIMARY KEY NOT NULL, \
+             data TEXT NOT NULL, \
+             expires_at BIGINT NOT NULL)",
+            "CREATE INDEX ironhold_sessions_expires_at ON ironhold_sessions (expires_at)",
+        ],
+    },
+    // Session ids are stored as SHA-256 hashes from now on. Rows written
+    // before held the plain id, which can't be hashed in SQL that works on
+    // both databases, so they're removed: everyone logs in again once.
+    Migration {
+        version: 2,
+        description: "store session ids hashed",
+        statements: &["DELETE FROM ironhold_sessions"],
+    },
+];
 
 /// Seconds since the Unix epoch.
 pub(crate) fn unix_now() -> i64 {

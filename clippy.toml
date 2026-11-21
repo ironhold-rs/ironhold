@@ -2,3 +2,14 @@
 allow-unwrap-in-tests = true
 allow-expect-in-tests = true
 allow-panic-in-tests = true
+
+# sqlx's QueryBuilder turns any string into SQL. Use
+# ironhold::db::QueryBuilder, which only takes string literals and bound
+# values. `allow-invalid` keeps crates that don't use sqlx quiet.
+disallowed-methods = [
+    { path = "sqlx::QueryBuilder::new", reason = "use ironhold::db::QueryBuilder, which only accepts SQL literals", allow-invalid = true },
+    { path = "sqlx::QueryBuilder::with_arguments", reason = "use ironhold::db::QueryBuilder, which only accepts SQL literals", allow-invalid = true },
+    { path = "sqlx::QueryBuilder::push", reason = "use ironhold::db::QueryBuilder, which only accepts SQL literals", allow-invalid = true },
+    { path = "sqlx::query_builder::Separated::push", reason = "use ironhold::db::QueryBuilder, which only accepts SQL literals", allow-invalid = true },
+    { path = "sqlx::query_builder::Separated::push_unseparated", reason = "use ironhold::db::QueryBuilder, which only accepts SQL literals", allow-invalid = true },
+]

@@ -1,0 +1,10 @@
+# `cargo clippy` rejects sqlx's QueryBuilder, which turns any string into
+# SQL. Build queries at runtime with ironhold::db::QueryBuilder instead: it
+# only takes SQL string literals and bound values.
+disallowed-methods = [
+    { path = "sqlx::QueryBuilder::new", reason = "use ironhold::db::QueryBuilder, which only accepts SQL literals" },
+    { path = "sqlx::QueryBuilder::with_arguments", reason = "use ironhold::db::QueryBuilder, which only accepts SQL literals" },
+    { path = "sqlx::QueryBuilder::push", reason = "use ironhold::db::QueryBuilder, which only accepts SQL literals" },
+    { path = "sqlx::query_builder::Separated::push", reason = "use ironhold::db::QueryBuilder, which only accepts SQL literals" },
+    { path = "sqlx::query_builder::Separated::push_unseparated", reason = "use ironhold::db::QueryBuilder, which only accepts SQL literals" },
+]

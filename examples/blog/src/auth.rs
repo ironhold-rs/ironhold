@@ -115,8 +115,10 @@ pub async fn login(
     Form(form): Form<LoginForm>,
 ) -> Result<Response> {
     let email = user::normalize_email(&form.email);
-    // 429 after too many failures for this account.
-    throttle.check(&email)?;
+    // 429 after too many failed logins for this account from this client.
+    // The attempt counts as a failure unless it's marked as a success, also
+    // while the password is still being checked.
+    let attempt = throttle.begin(&email)?;
 
     let found = user::find_for_login(&db, &email).await?;
     // With no matching user this still does the full check, so the response
@@ -126,13 +128,13 @@ pub async fn login(
 
     match found {
         Some((user, _)) if verified => {
-            throttle.record_success(&email);
+            attempt.succeeded();
             auth::login(&session, &user.id).await?;
             let next = safe_redirect_path(form.next.as_deref(), "/dashboard");
             Ok(Redirect::to(next).into_response())
         }
         _ => {
-            throttle.record_failure(&email);
+            attempt.failed();
             let form = login_form(
                 &csrf,
                 Some("Invalid email or password."),

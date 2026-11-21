@@ -257,3 +257,149 @@ async fn overload_returns_503_immediately_and_recovers() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 }
+
+/// A request body that sends `first` and then nothing, like a client
+/// trickling an upload.
+async fn stalled_body(
+    first: &'static str,
+) -> (http_body_util::channel::Sender<ironhold::body::Bytes>, Body) {
+    let (mut sender, body) = http_body_util::channel::Channel::<ironhold::body::Bytes>::new(4);
+    sender
+        .send_data(ironhold::body::Bytes::from_static(first.as_bytes()))
+        .await
+        .unwrap();
+    (sender, Body::new(body))
+}
+
+#[tokio::test]
+async fn slow_uploads_do_not_use_up_the_in_flight_limit() {
+    use std::time::Duration;
+
+    let mut config = Config::new(Environment::Development);
+    config.security.max_concurrent_requests = 1;
+    config.security.body_timeout = Duration::from_millis(300);
+    let router = App::with_config(config)
+        .route("/", get(|| async { "ok" }))
+        .route("/echo", post(|body: String| async move { body }))
+        .into_router();
+
+    // An upload that never finishes.
+    let (_sender, body) = stalled_body("n").await;
+    let slow = tokio::spawn(
+        router.clone().oneshot(
+            Request::post("/echo")
+                .header(header::CONTENT_LENGTH, "1000")
+                .body(body)
+                .unwrap(),
+        ),
+    );
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // The only in-flight slot is still free for everyone else.
+    let response = router
+        .clone()
+        .oneshot(Request::get("/").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // And the slow upload is cut off by the body timeout, not 30 s later.
+    let response = tokio::time::timeout(Duration::from_secs(5), slow)
+        .await
+        .expect("body timeout")
+        .unwrap()
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::REQUEST_TIMEOUT);
+    assert_eq!(header_str(&response, "x-frame-options"), Some("DENY"));
+}
+
+#[tokio::test]
+async fn each_client_gets_a_limited_number_of_uploads_at_once() {
+    use ironhold::extract::ConnectInfo;
+    use std::net::SocketAddr;
+
+    let mut config = Config::new(Environment::Development);
+    config.security.max_uploads_per_client = 2;
+    let router = App::with_config(config)
+        .route("/echo", post(|body: String| async move { body }))
+        .into_router();
+    let request = |peer: &str, body: Body| {
+        let mut request = Request::post("/echo").body(body).unwrap();
+        let peer: SocketAddr = peer.parse().unwrap();
+        request.extensions_mut().insert(ConnectInfo(peer));
+        request
+    };
+
+    let mut held = Vec::new();
+    for _ in 0..2 {
+        let (sender, body) = stalled_body("a").await;
+        held.push(sender);
+        tokio::spawn(router.clone().oneshot(request("203.0.113.9:1000", body)));
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+    let response = router
+        .clone()
+        .oneshot(request("203.0.113.9:1001", Body::from("x")))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+
+    let response = router
+        .oneshot(request("198.51.100.1:1000", Body::from("x")))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(body_text(response).await, "x");
+}
+
+#[tokio::test]
+async fn chunked_bodies_over_the_limit_are_rejected() {
+    let mut config = Config::new(Environment::Development);
+    config.security.max_body_bytes = 16;
+    let router = App::with_config(config)
+        .route("/echo", post(|body: String| async move { body }))
+        .into_router();
+    let (mut sender, body) = http_body_util::channel::Channel::<ironhold::body::Bytes>::new(4);
+    sender
+        .send_data(ironhold::body::Bytes::from_static(&[b'a'; 10]))
+        .await
+        .unwrap();
+    sender
+        .send_data(ironhold::body::Bytes::from_static(&[b'a'; 10]))
+        .await
+        .unwrap();
+    drop(sender);
+    let response = router
+        .oneshot(Request::post("/echo").body(Body::new(body)).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+}
+
+#[tokio::test]
+async fn client_ip_comes_from_trusted_proxies_only() {
+    use ironhold::extract::ConnectInfo;
+    use std::net::SocketAddr;
+
+    let app = |trusted: &[&str]| {
+        let mut config = Config::new(Environment::Development);
+        config.security.trusted_proxies = trusted.iter().map(|r| r.parse().unwrap()).collect();
+        App::with_config(config)
+            .route("/ip", get(|ip: ClientIp| async move { ip.to_string() }))
+            .into_router()
+    };
+    let request = || {
+        let mut request = Request::get("/ip")
+            .header("x-forwarded-for", "1.2.3.4, 198.51.100.7")
+            .body(Body::empty())
+            .unwrap();
+        let peer: SocketAddr = "10.0.0.2:4000".parse().unwrap();
+        request.extensions_mut().insert(ConnectInfo(peer));
+        request
+    };
+    let direct = app(&[]).oneshot(request()).await.unwrap();
+    assert_eq!(body_text(direct).await, "10.0.0.2");
+    let proxied = app(&["10.0.0.0/8"]).oneshot(request()).await.unwrap();
+    assert_eq!(body_text(proxied).await, "198.51.100.7");
+}

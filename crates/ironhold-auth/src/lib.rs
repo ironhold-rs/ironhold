@@ -2,9 +2,10 @@
 //!
 //! Passwords: [`hash_password`] and [`verify_password`] use Argon2id with
 //! the OWASP-recommended parameters. Hashing runs on the blocking thread
-//! pool, one job per CPU core at most, so a flood of logins can't stall
-//! other requests. Checking a login for an unknown account takes as long as
-//! checking a real one, so attackers can't tell which accounts exist.
+//! pool, one job per CPU core at most (also when clients hang up mid-hash),
+//! so a flood of logins can't stall other requests or use up memory.
+//! Checking a login for an unknown account takes as long as checking a
+//! real one, so attackers can't tell which accounts exist.
 //!
 //! Sessions: [`login`] issues a new session id and CSRF token, which
 //! prevents session fixation. [`logout`] deletes the session.
@@ -14,7 +15,8 @@
 //! unless policy `P` allows the user. Use `Option<AuthUser<U>>` for pages
 //! that work either way.
 //!
-//! Password guessing: [`LoginThrottle`] limits failed logins per account.
+//! Password guessing: [`LoginThrottle`] limits failed logins per account
+//! and client address, counting attempts that are still in progress.
 
 #![forbid(unsafe_code)]
 
@@ -31,4 +33,4 @@ pub use password::{
 };
 pub use redirect::safe_redirect_path;
 pub use session::{login, logout};
-pub use throttle::LoginThrottle;
+pub use throttle::{LoginAttempt, LoginThrottle};

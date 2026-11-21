@@ -16,12 +16,13 @@
 //! between requests, and adds the CSRF token from the last page it loaded
 //! to form submissions, like a real browser submitting a real form.
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, net::SocketAddr};
 
 use http_body_util::BodyExt;
 use ironhold_core::{
     App, Router,
     body::Body,
+    extract::ConnectInfo,
     http::{HeaderMap, HeaderValue, Request, StatusCode, header},
 };
 use tower::ServiceExt;
@@ -31,6 +32,7 @@ pub struct TestClient {
     router: Router,
     cookies: BTreeMap<String, String>,
     csrf_token: Option<String>,
+    peer: Option<SocketAddr>,
 }
 
 impl TestClient {
@@ -46,7 +48,17 @@ impl TestClient {
             router,
             cookies: BTreeMap::new(),
             csrf_token: None,
+            peer: None,
         }
+    }
+
+    /// Sends every request as if it came over a connection from `addr`,
+    /// so per-client limits (`ClientIp`, the login throttle) see it. By
+    /// default requests have no client address, as when a router is
+    /// called directly.
+    pub fn with_client_addr(mut self, addr: SocketAddr) -> Self {
+        self.peer = Some(addr);
+        self
     }
 
     /// Loads a page, like typing the URL into the address bar.
@@ -106,6 +118,9 @@ impl TestClient {
             Ok(request) => request,
             Err(error) => return TestResponse::client_error(&error.to_string()),
         };
+        if let Some(peer) = self.peer {
+            request.extensions_mut().insert(ConnectInfo(peer));
+        }
         if !self.cookies.is_empty() {
             let cookie_header = self
                 .cookies

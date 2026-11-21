@@ -1,4 +1,4 @@
-use std::{any::Any, future::Future, io, pin::Pin};
+use std::{any::Any, future::Future, io, pin::Pin, time::Duration};
 
 use axum::{
     Extension, Router,
@@ -7,9 +7,13 @@ use axum::{
     routing::MethodRouter,
 };
 use ironhold_session::{MemoryStore, SessionConfig, SessionStore};
+use tokio::{net::TcpListener, task::JoinSet, time::MissedTickBehavior};
 use tower_http::{catch_panic::CatchPanicLayer, trace::TraceLayer};
 
-use crate::{Config, Environment, Error};
+use crate::{Config, Environment, Error, server};
+
+/// How often the default in-memory session store drops expired sessions.
+const SESSION_CLEANUP_PERIOD: Duration = Duration::from_secs(5 * 60);
 
 /// Applies the session middleware. Boxed so `App` isn't generic over the
 /// store type.
@@ -41,7 +45,8 @@ pub struct App {
     router: Router,
     config: Config,
     sessions: SessionLayer,
-    memory_sessions: bool,
+    /// The default store, while no other store has been set.
+    memory_store: Option<MemoryStore>,
     extensions: Vec<ExtensionLayer>,
     background: Vec<BackgroundTask>,
 }
@@ -66,11 +71,12 @@ impl App {
 
     /// Creates an app with an explicit configuration.
     pub fn with_config(config: Config) -> Self {
+        let store = MemoryStore::new();
         Self {
             router: Router::new(),
             config,
-            sessions: session_layer(MemoryStore::default()),
-            memory_sessions: true,
+            sessions: session_layer(store.clone()),
+            memory_store: Some(store),
             extensions: Vec::new(),
             background: Vec::new(),
         }
@@ -100,15 +106,17 @@ impl App {
 
     /// Stores sessions in `store` instead of memory.
     ///
-    /// The default in-memory store loses sessions on restart and isn't
-    /// shared between server instances, so production apps should use a
-    /// database-backed store.
+    /// The default in-memory store ([`MemoryStore`]) loses sessions on
+    /// restart and isn't shared between server instances, so production
+    /// apps should use a database-backed store. It drops expired sessions
+    /// every few minutes and holds at most
+    /// [`DEFAULT_MAX_SESSIONS`](ironhold_session::DEFAULT_MAX_SESSIONS).
     pub fn session_store<Store>(mut self, store: Store) -> Self
     where
         Store: SessionStore + Clone,
     {
         self.sessions = session_layer(store);
-        self.memory_sessions = false;
+        self.memory_store = None;
         self
     }
 
@@ -145,34 +153,67 @@ impl App {
     }
 
     /// Binds to the configured address and serves until Ctrl+C or SIGTERM,
-    /// letting in-flight requests finish before exiting.
-    pub async fn serve(mut self) -> io::Result<()> {
+    /// letting in-flight requests finish (for up to
+    /// [`Config::shutdown_timeout`]) before exiting.
+    pub async fn serve(self) -> io::Result<()> {
+        let listener = TcpListener::bind(self.config.addr).await?;
+        self.serve_on(listener, shutdown_signal()).await
+    }
+
+    /// Serves on an already bound `listener` until `shutdown` completes,
+    /// then shuts down gracefully like [`serve`](App::serve). Useful in
+    /// tests (bind `127.0.0.1:0`) and when something else opens the socket.
+    ///
+    /// ```no_run
+    /// use ironhold_core::{App, routing::get};
+    ///
+    /// # async fn run() -> std::io::Result<()> {
+    /// let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    /// let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    /// let server = tokio::spawn(
+    ///     App::new()
+    ///         .route("/", get(|| async { "Hello" }))
+    ///         .serve_on(listener, async { let _ = stopped.await; }),
+    /// );
+    /// // ... send requests ...
+    /// let _ = stop.send(());
+    /// # let _ = server.await;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn serve_on<F>(mut self, listener: TcpListener, shutdown: F) -> io::Result<()>
+    where
+        F: Future<Output = ()> + Send,
+    {
         init_tracing();
 
-        let addr = self.config.addr;
         let environment = self.config.environment;
-        if environment == Environment::Production && self.memory_sessions {
+        if environment == Environment::Production && self.memory_store.is_some() {
             tracing::warn!(
                 "sessions are stored in memory: they are lost on restart and not shared \
                  between instances. Set a persistent store with App::session_store"
             );
         }
-        let background = std::mem::take(&mut self.background);
+        let mut background = std::mem::take(&mut self.background);
+        if let Some(store) = self.memory_store.clone() {
+            background.push(Box::pin(remove_expired_sessions(store)));
+        }
+        let limits = server::Limits::new(&self.config.security, self.config.shutdown_timeout);
         let router = self.into_router();
 
-        let listener = tokio::net::TcpListener::bind(addr).await?;
         tracing::info!(
             ?environment,
             "Ironhold listening on http://{}",
             listener.local_addr()?
         );
+        // Dropped when serving ends, which stops the tasks.
+        let mut tasks = JoinSet::new();
         for task in background {
-            tokio::spawn(task);
+            tasks.spawn(task);
         }
 
-        axum::serve(listener, router)
-            .with_graceful_shutdown(shutdown_signal())
-            .await
+        server::run(listener, router, limits, shutdown).await;
+        Ok(())
     }
 }
 
@@ -211,6 +252,18 @@ fn init_tracing() {
     let _ = tracing_subscriber::fmt().with_env_filter(filter).try_init();
 }
 
+async fn remove_expired_sessions(store: MemoryStore) {
+    let mut interval = tokio::time::interval(SESSION_CLEANUP_PERIOD);
+    interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    loop {
+        interval.tick().await;
+        let removed = store.remove_expired();
+        if removed > 0 {
+            tracing::debug!(removed, "removed expired sessions");
+        }
+    }
+}
+
 async fn shutdown_signal() {
     let ctrl_c = async {
         if let Err(error) = tokio::signal::ctrl_c().await {
@@ -238,5 +291,4 @@ async fn shutdown_signal() {
         () = ctrl_c => {},
         () = terminate => {},
     }
-    tracing::info!("shutting down gracefully");
 }

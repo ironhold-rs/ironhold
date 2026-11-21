@@ -58,7 +58,7 @@ macro_rules! impl_backend {
                 &self,
                 record: &mut tower_sessions::session::Record,
             ) -> tower_sessions::session_store::Result<()> {
-                use $crate::session_store::{MAX_CREATE_ATTEMPTS, backend, encode};
+                use $crate::session_store::{MAX_CREATE_ATTEMPTS, backend, encode, storage_id};
 
                 let data = encode(&record.data)?;
                 for _ in 0..MAX_CREATE_ATTEMPTS {
@@ -68,7 +68,7 @@ macro_rules! impl_backend {
                         "INSERT INTO ironhold_sessions (id, data, expires_at) \
                          VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING",
                     )
-                    .bind(record.id.to_string())
+                    .bind(storage_id(&record.id))
                     .bind(&data)
                     .bind(record.expiry_date.unix_timestamp())
                     .execute(self.pool())
@@ -88,14 +88,14 @@ macro_rules! impl_backend {
                 &self,
                 record: &tower_sessions::session::Record,
             ) -> tower_sessions::session_store::Result<()> {
-                use $crate::session_store::{backend, encode};
+                use $crate::session_store::{backend, encode, storage_id};
 
                 sqlx::query(
                     "INSERT INTO ironhold_sessions (id, data, expires_at) VALUES ($1, $2, $3) \
                      ON CONFLICT (id) DO UPDATE \
                      SET data = excluded.data, expires_at = excluded.expires_at",
                 )
-                .bind(record.id.to_string())
+                .bind(storage_id(&record.id))
                 .bind(encode(&record.data)?)
                 .bind(record.expiry_date.unix_timestamp())
                 .execute(self.pool())
@@ -110,13 +110,13 @@ macro_rules! impl_backend {
             ) -> tower_sessions::session_store::Result<Option<tower_sessions::session::Record>>
             {
                 use tower_sessions::cookie::time::OffsetDateTime;
-                use $crate::session_store::{backend, decode};
+                use $crate::session_store::{backend, decode, storage_id};
 
                 let row: Option<(String, i64)> = sqlx::query_as(
                     "SELECT data, expires_at FROM ironhold_sessions \
                      WHERE id = $1 AND expires_at > $2",
                 )
-                .bind(id.to_string())
+                .bind(storage_id(id))
                 .bind($crate::schema::unix_now())
                 .fetch_optional(self.pool())
                 .await
@@ -139,7 +139,7 @@ macro_rules! impl_backend {
                 id: &tower_sessions::session::Id,
             ) -> tower_sessions::session_store::Result<()> {
                 sqlx::query("DELETE FROM ironhold_sessions WHERE id = $1")
-                    .bind(id.to_string())
+                    .bind($crate::session_store::storage_id(id))
                     .execute(self.pool())
                     .await
                     .map_err($crate::session_store::backend)?;

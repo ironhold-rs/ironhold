@@ -12,6 +12,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
+async-trait.workspace = true
 axum.workspace = true
 getrandom.workspace = true
 maud.workspace = true

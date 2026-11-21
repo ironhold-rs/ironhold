@@ -6,6 +6,7 @@
 mod app;
 mod config;
 mod error;
+mod server;
 
 pub use app::App;
 pub use config::{Config, ConfigError, Environment};
