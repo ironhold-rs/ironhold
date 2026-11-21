@@ -39,6 +39,7 @@ Tests drive the app like a browser with `ironhold::testing::TestClient`.
 | `DATABASE_URL` | Where the database is |
 | `IRONHOLD_ENV` | `development` or `production` |
 | `IRONHOLD_ADDR` | Listen address (default `127.0.0.1:3000`) |
+| `IRONHOLD_TRUSTED_PROXIES` | Addresses of reverse proxies in front of the app, e.g. `127.0.0.1` |
 | `RUST_LOG` | Log level, e.g. `info` or `debug` |
 
 `ironhold dev` reads these from `.env` (see `.env.example`).
@@ -49,4 +50,6 @@ Tests drive the app like a browser with `ironhold::testing::TestClient`.
 cargo build --release
 ```
 
-That produces one binary, `target/release/{{name}}`, with migrations built in. Run it with `IRONHOLD_ENV=production` and `IRONHOLD_ADDR=0.0.0.0:8080` behind an HTTPS proxy such as Caddy or Nginx. HTTPS is required in production: session cookies are only sent over HTTPS.
+That produces one binary, `target/release/{{name}}`, with migrations built in. Run it with `IRONHOLD_ENV=production` and `IRONHOLD_ADDR=0.0.0.0:8080` behind an HTTPS proxy. HTTPS is required in production: session cookies are only sent over HTTPS.
+
+Use a proxy that reads the whole request body before passing it on, such as Nginx (it does by default). Caddy streams bodies through, so slow uploads reach the app. Then tell the app where the proxy connects from, so the login throttle and upload limits see each visitor's address instead of the proxy's: `IRONHOLD_TRUSTED_PROXIES=127.0.0.1` when it runs on the same machine.

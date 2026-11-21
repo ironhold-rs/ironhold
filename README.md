@@ -40,16 +40,16 @@ Every app gets these with zero configuration:
 | Session theft | Server-side sessions; the cookie is `HttpOnly`, `SameSite=Lax`, and `Secure` with the `__Host-` prefix in production |
 | Clickjacking, MIME sniffing | `X-Frame-Options`, `frame-ancestors`, `nosniff`, COOP/CORP |
 | HTTPS downgrade | HSTS and `upgrade-insecure-requests` in production |
-| Oversized or slow requests | Body size limit (2 MiB) and request timeout (30 s) |
-| Overload | Beyond 1024 requests in flight, new requests get an instant `503` with `Retry-After`, so the server stays fast for the requests it accepts |
+| Oversized or slow requests | Body size limit (2 MiB); headers must arrive within 10 s and bodies within 10 s (longer only while they keep coming at 1 KiB/s or more); idle connections close after 10 s; at most 32 uploads in progress per client address; request timeout (30 s) |
+| Overload | Beyond 1024 requests in flight, new requests get an instant `503` with `Retry-After`, so the server stays fast for the requests it accepts. Bodies are read before a request counts as in flight, so slow uploads can't use up the slots |
 | Crashes | A panic in a handler becomes a `500`; the server keeps running. Framework code can't contain `unwrap`, `expect` or `panic` (enforced in CI) |
-| SQL injection | sqlx 0.9 only accepts SQL string literals; values always go through `.bind()` |
+| SQL injection | `sqlx::query` only accepts SQL string literals, and `ironhold::db::QueryBuilder` builds dynamic queries from literals and bound values only. Runtime SQL needs an explicit `AssertSqlSafe` or `push_unchecked`. sqlx's own `QueryBuilder` takes any string, so apps made by `ironhold new` forbid it in `clippy.toml` |
 | Leaking internals | `500` responses never include error details; they're logged instead |
 | Leaking secrets | `Secret<T>` prints `[REDACTED]` and can't be serialized |
-| Weak password storage | Argon2id with OWASP parameters, hashed off the async threads with limited concurrency |
+| Weak password storage | Argon2id with OWASP parameters, hashed off the async threads, at most one hash per CPU core even when clients hang up mid-hash |
 | Pages that forget to check login | A handler taking `AuthUser<User>` can't run for logged-out visitors; `Authorize<User, Policy>` can't run unless the policy allows it |
-| Password guessing | 5 failed logins per account per 5 minutes, then `429` |
-| Account discovery | Logins for unknown emails take as long as real ones |
+| Password guessing | 5 failed logins per account and client address per 5 minutes, then `429`. Attempts still in progress count, so parallel guesses don't get more through. Guesses from one address never lock the owner out from another (see below) |
+| Account discovery | Logins for unknown emails take as long as real ones. Sign up still says when an email is taken, until email confirmation arrives |
 | Session fixation, open redirects | Login issues a new session id and CSRF token; `?next=` only redirects within the site |
 | Memory safety bugs | Rust, with `#![forbid(unsafe_code)]` in every framework crate |
 
@@ -98,9 +98,12 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 |---|---|---|
 | `IRONHOLD_ENV` | `development` | `development` or `production`. Production turns on HSTS. |
 | `IRONHOLD_ADDR` | `127.0.0.1:3000` | Listen address. Use `0.0.0.0:PORT` to accept outside connections. |
+| `IRONHOLD_TRUSTED_PROXIES` | none | Reverse proxies in front of the app, as addresses or CIDR ranges (`127.0.0.1,10.0.0.0/8`). Their `X-Forwarded-For` header gives the visitor's address. |
 | `RUST_LOG` | `info` | Log filter, e.g. `debug` or `ironhold_core=debug` |
 
 Invalid values stop the app at startup instead of falling back silently.
+
+In production, put the app behind an HTTPS reverse proxy that reads the whole request body before passing it on. Nginx does this by default (`proxy_request_buffering on`); Caddy streams bodies through, so slow uploads reach the app. Ironhold's own limits keep slow clients from taking capacity away from other visitors, but a buffering proxy stops them earlier. Set `IRONHOLD_TRUSTED_PROXIES` to the proxy's address so per-client limits and the login throttle see visitors' addresses, not the proxy's.
 
 ## Forms and CSRF
 
@@ -133,7 +136,7 @@ async fn create_post(Form(post): Form<NewPost>) -> Markup {
 
 For `fetch` requests, send the token in the `X-CSRF-Token` header instead.
 
-Without a database, sessions are kept in memory and are lost on restart. Connect a database (below) and they're stored there automatically.
+Without a database, sessions are kept in memory and are lost on restart. Expired ones are dropped every 5 minutes and at most 100,000 are kept. Connect a database (below) and they're stored there automatically.
 
 ## Validation
 
@@ -194,6 +197,8 @@ async fn admin(admin: Authorize<User, Admins>) -> Markup { /* ... */ }
 
 `ironhold::auth` provides `hash_password`, `verify_password`, `login`, `logout`, `LoginThrottle` and `safe_redirect_path`. The app generated by `ironhold new` shows them working together in `src/auth.rs`.
 
+`LoginThrottle` counts failures per account *and* client address. Counting per account alone would let anyone lock a user out with five wrong guesses; this way a correct password from the user's own address still works. The trade-off is that an attacker with many addresses gets five guesses from each (IPv6 addresses count per `/64` network), which is why passwords need at least 12 characters.
+
 ## Testing
 
 With the `testing` feature, `TestClient` drives your app in memory like a browser: it keeps cookies and fills in CSRF tokens.
@@ -241,7 +246,17 @@ async fn count(db: SqliteDb) -> Result<String> {
 }
 ```
 
-SQLite runs in WAL mode (readers never block the writer) with `synchronous=NORMAL`, foreign keys on, a 5 second busy timeout and one connection per CPU core. Postgres gets 10 connections, and remote hosts require TLS unless the URL sets `sslmode`. With either database, a request waits at most 5 seconds for a connection and then fails instead of piling up, and expired sessions are cleaned up every 5 minutes.
+SQLite runs in WAL mode (readers never block the writer) with `synchronous=NORMAL`, foreign keys on, a 5 second busy timeout and one connection per CPU core. Postgres gets 10 connections, and connections to remote hosts use TLS and verify the server's certificate and host name (`sslmode=verify-full`) unless the URL sets `sslmode`. For a database with a certificate from a private authority (Amazon RDS, Cloud SQL), add `sslrootcert=/path/to/ca.pem` to the URL. With either database, each connection caches 100 prepared statements, a request waits at most 5 seconds for a connection and then fails instead of piling up, sessions are stored under a hash of their id, and expired sessions are cleaned up every 5 minutes.
+
+For queries put together at runtime, use `ironhold::db::QueryBuilder`:
+
+```rust
+let mut query = QueryBuilder::<Sqlite>::new("SELECT id, title FROM posts WHERE 1 = 1");
+if let Some(author) = filter.author {
+    query.push(" AND author_id = ").push_bind(author);
+}
+let posts: Vec<(i64, String)> = query.build_query_as().fetch_all(&*db).await?;
+```
 
 ## Crates
 

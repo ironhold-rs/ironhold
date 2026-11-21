@@ -188,7 +188,7 @@ async fn delete_post(db: &SqliteDb, id: i64) -> Result<()> {
 }
 ```
 
-Two things keep this safe. sqlx only accepts SQL written as a string literal, and every value goes through `.bind()`, so user input can never become part of the SQL. And `insert_post` and `update_post` take `Valid<PostForm>`, which only `validate()` can produce. Forgetting to validate is a compile error instead of a bug in production.
+Two things keep this safe. `sqlx::query` only accepts SQL written as a string literal, and every value goes through `.bind()`, so user input can never become part of the SQL. (For queries assembled at runtime, such as search filters, use `ironhold::db::QueryBuilder`, which follows the same rules. sqlx's own `QueryBuilder` accepts any string, so the app's `clippy.toml` forbids it.) And `insert_post` and `update_post` take `Valid<PostForm>`, which only `validate()` can produce. Forgetting to validate is a compile error instead of a bug in production.
 
 `find_post` turns a missing row into `Error::NotFound`, which becomes a `404`. The `?` after each query turns a database error into a `500` that's logged on the server and shows no details to visitors.
 
@@ -598,7 +598,7 @@ That builds one binary, `target/release/blog`, with the migrations inside it. On
 IRONHOLD_ENV=production IRONHOLD_ADDR=0.0.0.0:8080 DATABASE_URL=sqlite:///var/lib/blog/blog.db ./blog
 ```
 
-Put it behind an HTTPS proxy such as Caddy or Nginx. HTTPS is required in production, because the session cookie is only sent over HTTPS.
+Put it behind an HTTPS proxy. HTTPS is required in production, because the session cookie is only sent over HTTPS. Pick a proxy that reads the whole request body before passing it on, such as Nginx (it does by default; Caddy streams bodies through), and add `IRONHOLD_TRUSTED_PROXIES=127.0.0.1` when it runs on the same machine, so the login throttle sees each visitor's address rather than the proxy's.
 
 The whole database is one SQLite file. Back it up with `sqlite3 /var/lib/blog/blog.db ".backup backup.db"`, which is safe while the app is running.
 
